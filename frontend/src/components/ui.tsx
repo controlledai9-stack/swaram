@@ -335,6 +335,5 @@ export { ModePill } from "./ModePill";
 export { Pill } from "./Pill";
 export { Tile } from "./Tile";
 export { Footnotes } from "./Footnotes";
-export { ThemeToggle } from "./ThemeToggle";
 export { GlobalNav } from "./GlobalNav";
 export { Drawer } from "./Drawer";

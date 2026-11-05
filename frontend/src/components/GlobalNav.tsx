@@ -1,5 +1,4 @@
 import { useAppState } from "../state";
-import { ThemeToggle } from "./ThemeToggle";
 import { ChevronDown } from "lucide-react";
 
 export interface NavItem {
@@ -96,7 +95,6 @@ export function GlobalNav({ currentRoute }: { currentRoute: string }) {
             />
           )}
 
-          <ThemeToggle />
         </div>
       </div>
     </header>

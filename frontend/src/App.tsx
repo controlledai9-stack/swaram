@@ -54,6 +54,13 @@ export default function App() {
   const route = useHashRoute();
   const { apiError } = useAppState();
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("sg_theme", "light");
+      document.documentElement.setAttribute("data-theme", "light");
+    } catch {}
+  }, []);
+
   // Route routing resolution
   let content = <OverviewPage />;
   const cleanRoute = route.split("/")[0] || "overview";
