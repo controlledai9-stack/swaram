@@ -134,7 +134,7 @@ export function LivePage() {
         </div>
         {ai && <div className="mt-4 max-w-md"><GeminiQuota agentCount={count} agentMode="autonomous" /></div>}
         <div className="mt-5 flex items-center justify-between gap-3">
-          <span className="flex items-center gap-2 text-[13px] text-muted">
+          <span className="flex items-center gap-2 text-[14px] text-[var(--text-2)]">
             <span className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-[var(--ok)]" : "bg-[var(--crit)]"}`} />
             {connected ? "Live stream connected" : "Connecting…"}
           </span>
@@ -146,10 +146,10 @@ export function LivePage() {
         <Card title={running ? "Agents (live)" : "Agents"}>
           {agents.length ? (
             <>
-              <ul className="space-y-2 text-[13px]">
+              <ul className="space-y-2 text-[14px]">
                 {agents.map(([id, a]) => (
                   <li key={id} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0"><span className="font-mono">{shortId(id)}</span> <span className="text-muted">{a.role}</span></span>
+                    <span className="min-w-0"><span className="font-mono">{shortId(id)}</span> <span className="text-[var(--text-2)]">{a.role}</span></span>
                     <span className="flex items-center gap-2">
                       <Badge value={a.state === "active" ? "allowed" : a.state === "paused" ? "blocked" : "would_block"} />
                       {running && a.state !== "paused" && (
@@ -167,22 +167,22 @@ export function LivePage() {
                   Stop run (pause every agent)
                 </Button>
               )}
-              {!running && <p className="mt-3 text-[12px] text-faint">The run has finished; decisions go to the review queue on Responses.</p>}
+              {!running && <p className="mt-3 text-[12px] text-[var(--text-3)]">The run has finished; decisions go to the review queue on Responses.</p>}
             </>
           ) : <Empty>Agents appear when a run starts.</Empty>}
         </Card>
         <Card title={`Live feed (${messages.length})`}>
-          <div className="mb-3 flex items-center justify-between text-[12px] text-muted">
+          <div className="mb-3 flex items-center justify-between text-[12px] text-[var(--text-2)]">
             <label className="flex items-center gap-2"><input type="checkbox" checked={showEvents} onChange={(e) => setShowEvents(e.target.checked)} /> Show every event</label>
             <button className="underline" onClick={clear}>Clear</button>
           </div>
           {feed.length ? (
-            <ol className="max-h-[560px] space-y-1.5 overflow-y-auto text-[13px]" aria-label="Live feed">
+            <ol className="max-h-[560px] space-y-1.5 overflow-y-auto text-[14px]" aria-label="Live feed">
               {feed.map((m) => (
                 <li key={m.seq} className="flex items-start gap-2">
-                  <span className="w-12 shrink-0 font-mono text-[11px] text-faint">#{m.seq}</span>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[m.type] ?? "bg-[var(--low-bg)] text-muted"}`}>{m.type}</span>
-                  <span className={`min-w-0 [overflow-wrap:anywhere] ${m.type === "event" && (m.data as AnyData).status === "denied" ? "text-[var(--crit)]" : "text-ink"}`}>{describe(m as LiveMessage<AnyData>)}</span>
+                  <span className="w-12 shrink-0 font-mono text-[11px] text-[var(--text-3)]">#{m.seq}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TONE[m.type] ?? "bg-[var(--low-bg)] text-[var(--text-2)]"}`}>{m.type}</span>
+                  <span className={`min-w-0 [overflow-wrap:anywhere] ${m.type === "event" && (m.data as AnyData).status === "denied" ? "text-[var(--crit)]" : "text-[var(--text)]"}`}>{describe(m as LiveMessage<AnyData>)}</span>
                 </li>
               ))}
             </ol>
