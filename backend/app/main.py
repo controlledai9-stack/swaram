@@ -234,7 +234,8 @@ def ingest_open(body: dict[str, Any], p: Pipeline = P) -> dict[str, Any]:
 
     out = ingest.open_session(p, body.get("name") or "external", body.get("agents") or [],
                               body.get("live_guard", "contain"), float(body.get("pause_at", 0.6)),
-                              require_identity=bool(body.get("require_agent_identity")))
+                              require_identity=bool(body.get("require_agent_identity")),
+                              token_ttl=body.get("token_ttl"))
     if body.get("mcp"):
         ingest.SESSIONS[out["run_id"]].mcp = dict(body["mcp"])  # MCP gateway settings (services/mcp_gateway.py)
         out["mcp"] = {a["agent_id"]: f"/api/ingest/{out['run_id']}/mcp/{a['agent_id']}" for a in body.get("agents") or []}

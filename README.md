@@ -25,13 +25,13 @@ No model is needed: everything runs offline with scripted agents, and real model
   its own; an AI planner assigns the work; agents remember earlier rounds. Attacks are never asked of a model: they are
   scripted, or planted as prompt injections (16 of them, from phishing to a self-spreading worm, a poisoned memory and a sleeper note);
   internal-goal cases test agents with a goal of their own and no attacker.
-- **Threat Detection**: 28 rules (SG-001 to SG-028), a learned behavioural baseline, Bayesian risk with explanations,
+- **Threat Detection**: 29 rules (SG-001 to SG-029), a learned behavioural baseline, Bayesian risk with explanations,
   and an accuracy benchmark (30 attacks, 14 benign look-alikes; precision 1.0). A second, independent evidence source
   (egress proxy, audit and broker logs) keeps detection working when the agent log loses events.
 - **Live guard**: detection while a run happens. It refuses any out-of-policy action before it runs (whatever the
   cause: injection, a goal of the agent's own, a bug), blocks a hijacked agent before its first harmful action,
-  quarantines impersonated messages, applies the response policy as alerts fire, and pushes everything to the UI over a
-  WebSocket (`docs/live-stream.md`).
+  quarantines impersonated messages, applies the response policy as alerts fire, trips a swarm circuit breaker on a
+  cascade, and pushes everything to the UI over a WebSocket (`docs/live-stream.md`).
 - **Security Response**: a review queue (release / confirm, escalation, who decided), operator controls (pause an agent,
   stop a run), webhook notifications, honest records (`blocked` only when an action was really denied), and an egress
   proxy that enforces pauses and holds at the network even when the agent platform doesn't cooperate.
@@ -49,6 +49,7 @@ No model is needed: everything runs offline with scripted agents, and real model
 | `docs/threat-model.md` | Every threat, rule and measured result |
 | `docs/live-stream.md` | The live stream contract, operator controls, ingest API |
 | `docs/owasp-agentic.md` | Coverage of the OWASP Top 10 for Agentic Applications |
+| `docs/swarm-traces.md` | Results on a real multi-agent incident and the AgentDojo benchmark |
 | `docs/injection-classifier.md` | The trained injection classifier: data, licenses, measured results |
 | `sdk/python/README.md` | Connecting an agent platform (SDK, LangChain) |
 | `docs/collector-and-response.md` | Collector and response features |

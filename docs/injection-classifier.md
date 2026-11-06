@@ -62,6 +62,25 @@ the behaviour rules stay: SG-012, the tripwire, the egress allowlist and the pro
 - On jackhhao's benign role-play prompts it raises 14% false alarms. Those are chat prompts, not workspace documents;
   on our own documents it raised none.
 
+## Two more detectors, and a plug-in for a stronger model
+
+Beyond the trained linear model, SG-028's score is the highest of:
+- the **trained model** (hashed word and character n-grams);
+- a **policy-aware destination check**: untrusted content that names an external destination not on the deployment's
+  allowlist (e.g. "uploads now go to X", "retry via Y"). This catches injections that read like ordinary policy pages,
+  which wording-based models miss. On our 18 hand-written injections it lifted recall from 0.67 to **0.94** (17/18),
+  at the cost of 1 false alarm on the attacker's own planted wiki page.
+
+Before scoring, text is normalised against cheap evasions: invisible characters removed, look-alike letters mapped to
+ASCII, leetspeak undone, and base64 blobs decoded; the highest score across the variants counts.
+
+For deployments that want more than a linear model, set `SWARMGUARD_INJECTION_SCORER_URL` to a service running a
+stronger classifier (e.g. Meta Prompt Guard on a GPU box): SwarmGuard POSTs `{"text"}`, expects `{"score": 0..1}`, and
+takes the higher of the two scores. Any failure falls back to the built-in model, so it never breaks detection.
+
+External, held-out benchmark (AgentDojo, five real models, `docs/swarm-traces.md`): recall 0.66 on 2,810 attacked tool
+results, 0.10 false positives on clean ones.
+
 ## How it's used
 
 - **SG-028 alert (always on).** A run-level alert names the source and who read it. The reader is not blamed. If the

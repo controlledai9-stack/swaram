@@ -23,6 +23,7 @@ import hmac
 import os
 import secrets
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -35,9 +36,26 @@ SESSIONS: dict[str, "IngestSession"] = {}
 _SECRET = (os.getenv("SWARMGUARD_IDENTITY_SECRET") or "").encode() or secrets.token_bytes(32)
 
 
-def agent_token(run_id: str, agent_id: str) -> str:
-    mac = hmac.new(_SECRET, f"{run_id}/{agent_id}".encode(), hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+def _mac(msg: str) -> str:
+    return base64.urlsafe_b64encode(hmac.new(_SECRET, msg.encode(), hashlib.sha256).digest()).decode().rstrip("=")
+
+
+def agent_token(run_id: str, agent_id: str, expires_at: int | None = None) -> str:
+    """A token proving the holder is this agent. With expires_at (unix seconds) it is scoped to that lifetime:
+    `<exp>.<mac>`; otherwise it lasts the session. Nothing but the holder of the secret can forge one."""
+    if expires_at is None:
+        return _mac(f"{run_id}/{agent_id}")
+    return f"{expires_at}.{_mac(f'{run_id}/{agent_id}/{expires_at}')}"
+
+
+def token_valid(run_id: str, agent_id: str, token: str, now: int) -> bool:
+    if token and "." in token:
+        exp_s, _, _ = token.partition(".")
+        if exp_s.isdigit():
+            exp = int(exp_s)
+            return exp >= now and hmac.compare_digest(agent_token(run_id, agent_id, exp), token)
+        return False
+    return bool(token) and hmac.compare_digest(agent_token(run_id, agent_id), token)
 
 
 class IngestSession:
@@ -51,10 +69,10 @@ class IngestSession:
         self.stream.start(run_id, agents)
 
     def verify(self, agent_id: str | None, token: str | None) -> bool:
-        """True if identity isn't required, or `token` is this agent's own token."""
+        """True if identity isn't required, or `token` is this agent's own token and not expired."""
         if not self.require_identity:
             return True
-        return bool(agent_id and token) and hmac.compare_digest(agent_token(self.run_id, agent_id), token)
+        return bool(agent_id and token) and token_valid(self.run_id, agent_id, token, int(time.time()))
 
     def gate(self, req: dict) -> dict:
         with self.lock:
@@ -79,7 +97,7 @@ class IngestSession:
 
 
 def open_session(pipeline, name: str, agents: list[dict], live_guard: str = "contain", pause_at: float = 0.6,
-                 require_identity: bool = False) -> dict:
+                 require_identity: bool = False, token_ttl: int | None = None) -> dict:
     if not agents:
         raise ValueError("a session needs at least one agent (agent_id, role, permissions)")
     run_id = f"run-{uuid.uuid4().hex[:8]}"
@@ -98,8 +116,10 @@ def open_session(pipeline, name: str, agents: list[dict], live_guard: str = "con
     from app.services import review
 
     SESSIONS[run_id] = IngestSession(run_id, regs, guard, review.recorder(pipeline.store, run_id), require_identity)
+    exp = int(time.time()) + token_ttl if token_ttl else None  # scoped tokens expire; re-open or re-issue to renew
     return {"run_id": run_id, "stream": f"/api/live?run_id={run_id}", "require_agent_identity": require_identity,
-            "agent_tokens": {a.agent_id: agent_token(run_id, a.agent_id) for a in regs}}
+            "token_ttl": token_ttl,
+            "agent_tokens": {a.agent_id: agent_token(run_id, a.agent_id, exp) for a in regs}}
 
 
 def session(run_id: str) -> IngestSession:
