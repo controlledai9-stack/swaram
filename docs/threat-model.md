@@ -651,3 +651,27 @@ the SDK. Platforms that don't call the gate are covered at the network by the eg
 - **Would SwarmGuard have stopped them?** We re-probed the 20 harmful situations once more (models are stochastic).
   7 were harmful again, and **the pre-execution check refused all 7** (6 internal-goal, 1 injection). Replies are now
   stored in full (4,000 characters), so this check can be repeated on any run.
+
+## 24. Outside proof, a covert-channel rule, and two hardening controls
+
+Answering the "we only grade ourselves" gap, plus the remaining OWASP partials.
+
+- **SG-029, covert staged transfer.** A new rule for the shape of a staged payload moved through an encoded channel
+  (fragment chains, remote-script pulls, assemble-and-run, decoder-plus-executor, or a credential leaving). Modelled on
+  the real Swarm Traces incident, not on our own scenarios.
+- **Outside proof** (`docs/swarm-traces.md`):
+  - Swarm Traces incident: SG-029 flagged 32,718 covert-transfer rows with 0 false positives on a benign baseline;
+    the data also shows 1,535 destinations reached from more than one agent identifier (real agent-to-agent spread).
+  - AgentDojo, five real models the classifier never trained on: SG-028 recall 0.66 on 2,810 attacked tool results,
+    0.10 false positives on clean ones.
+- **Classifier, stronger.** SG-028 now also runs a policy-aware destination check (recall on our injections 0.67 ->
+  0.94) and normalises against invisible characters, look-alike letters, leetspeak and base64 before scoring. An
+  optional `SWARMGUARD_INJECTION_SCORER_URL` plugs in a heavier model, falling back safely.
+- **Scoped agent identity tokens (ASI03).** A session may issue tokens with a TTL (`token_ttl`); events, gate calls
+  and proxied traffic with an expired token are refused. The expiry is inside the HMAC, so it can't be extended.
+- **Swarm circuit breaker (ASI08).** Once containment spreads to a set number of agents (default 4), the live guard
+  pauses the rest instead of watching the cascade continue. It trips on the worm scenario and never on normal runs,
+  and is off with `cascade_agents=0`.
+
+OWASP Agentic Top 10 coverage is now 7 strong, 3 partial (supply-chain signing, VM-grade sandboxing, and subtle human
+persuasion remain partial).

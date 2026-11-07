@@ -347,6 +347,12 @@ from app.modules.detection.content_rules import CONTENT_IMPLS, CONTENT_RULES  # 
 DEFAULT_RULES.extend(CONTENT_RULES)
 RULE_IMPLS.update(CONTENT_IMPLS)
 
+# Covert staged-transfer channels (SG-029), modelled on the Swarm Traces incident.
+from app.modules.detection.covert import COVERT_IMPLS, COVERT_RULES  # noqa: E402
+
+DEFAULT_RULES.extend(COVERT_RULES)
+RULE_IMPLS.update(COVERT_IMPLS)
+
 
 SENSOR_READERS = {"SG-021"}  # rules that reconcile sensor records with the agent log
 
