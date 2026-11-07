@@ -8,7 +8,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { id: "overview", path: "#/", label: "Overview" },
+  { id: "dashboard", path: "#/", label: "Dashboard" },
   { id: "live", path: "#/live", label: "Live Guard" },
   { id: "incidents", path: "#/incidents", label: "Incidents" },
   { id: "assurance", path: "#/assurance", label: "Assurance" },
@@ -19,7 +19,7 @@ export function GlobalNav({ currentRoute }: { currentRoute: string }) {
   const { runs, selectedRunId, selectRun, health } = useAppState();
 
   const isCurrent = (id: string) => {
-    if (id === "overview") return currentRoute === "" || currentRoute === "overview" || currentRoute === "/";
+    if (id === "dashboard" || id === "overview") return currentRoute === "" || currentRoute === "dashboard" || currentRoute === "overview" || currentRoute === "/";
     if (id === "live") return currentRoute.startsWith("live") || currentRoute.startsWith("swarm");
     if (id === "incidents") return currentRoute.startsWith("incidents") || currentRoute.startsWith("responses");
     if (id === "assurance") return currentRoute.startsWith("assurance") || currentRoute.startsWith("owasp") || currentRoute.startsWith("coverage") || currentRoute.startsWith("evaluation");

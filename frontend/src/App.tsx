@@ -59,9 +59,9 @@ export default function App() {
 
   // Route routing resolution across the 5 core hubs
   let content = <OverviewPage />;
-  const cleanRoute = route.split("/")[0] || "overview";
+  const cleanRoute = route.split("/")[0] || "dashboard";
 
-  if (route === "" || route === "/" || cleanRoute === "overview") {
+  if (route === "" || route === "/" || cleanRoute === "dashboard" || cleanRoute === "overview") {
     content = <OverviewPage />;
   } else if (cleanRoute === "incidents") {
     const alertId = route.split("/")[1];
