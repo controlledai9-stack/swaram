@@ -28,19 +28,28 @@ function AgentRoleBadge({
       title={`Click to copy full ID: ${agentId}`}
     >
       <span className="capitalize">{role}</span>
-      <button
-        type="button"
+      <span
+        role="button"
+        tabIndex={0}
         onClick={(e) => {
           e.stopPropagation();
           navigator.clipboard.writeText(agentId);
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
-        className="text-[var(--text-3)] hover:text-[var(--accent)] transition-opacity"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.stopPropagation();
+            navigator.clipboard.writeText(agentId);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }
+        }}
+        className="cursor-pointer text-[var(--text-3)] hover:text-[var(--accent)] transition-opacity"
         aria-label={`Copy full agent ID ${agentId}`}
       >
         {copied ? <Check size={12} className="text-[var(--ok)]" /> : <Copy size={12} />}
-      </button>
+      </span>
     </span>
   );
 }
