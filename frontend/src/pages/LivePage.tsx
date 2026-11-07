@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { SwarmPage } from "./SwarmPage";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { GeminiQuota } from "../components/GeminiQuota";
 import { PageHeader } from "../components/PageHeader";
-import { Badge, Button, Card, Empty, Field, Segmented, StatusBanner, inputCls, type Status } from "../components/ui";
+import { Badge, Button, Card, CustomSelect, Empty, Field, Segmented, StatusBanner, type Status } from "../components/ui";
 import { shortId } from "../lib/format";
 import { type LiveMessage, useLiveStream } from "../lib/live";
 import { useAppState } from "../state";
@@ -83,7 +84,12 @@ function describe(m: LiveMessage<AnyData>): { title: string; subtitle?: string; 
 }
 
 /** Live monitor: real-time streaming telemetry, pre-execution gates, and circuit breaker status */
-export function LivePage() {
+export function LivePage({ initialView = "feed" }: { initialView?: "feed" | "topology" } = {}) {
+  const [activeView, setActiveView] = useState<"feed" | "topology">(initialView);
+
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
   const { meta } = useAppState();
   const { messages, connected, totalReceived, clear, reset } = useLiveStream(undefined, 5000);
   const [scenario, setScenario] = useState("coordinated_leakage");
@@ -231,22 +237,46 @@ export function LivePage() {
   return (
     <div className="min-w-0 space-y-6">
       <PageHeader
-        title="Live."
-        subtitle="Real-time multi-agent telemetry stream with pre-execution policy gating, SG-029 covert transfer detection, and automatic swarm circuit-breakers."
+        title="Live Guard."
+        subtitle="Real-time multi-agent telemetry stream, policy gating, covert transfer detection, and swarm communication topology."
         actions={
-          <Button
-            variant="secondary"
-            onClick={handleResetAll}
-            busy={resetting}
-            className="text-[13px] border-[var(--hairline)]"
-          >
-            <RotateCcw size={14} className="mr-1.5" />
-            <span>Reset All</span>
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented
+              value={activeView}
+              onChange={(v) => {
+                setActiveView(v);
+                if (v === "topology") window.location.hash = "#/swarm";
+                else window.location.hash = "#/live";
+              }}
+              options={[
+                { value: "feed", label: "Live Telemetry Feed" },
+                { value: "topology", label: "Swarm Topology Graph" },
+              ]}
+            />
+            {activeView === "feed" && (
+              <Button
+                variant="secondary"
+                onClick={handleResetAll}
+                busy={resetting}
+                className="text-[13px] border-[var(--hairline)]"
+              >
+                <RotateCcw size={14} className="mr-1.5" />
+                <span>Reset All</span>
+              </Button>
+            )}
+          </div>
         }
       />
 
       <StatusBanner status={status} onClose={() => setStatus(null)} />
+
+      {activeView === "topology" ? (
+        <div className="transition-opacity">
+          <SwarmPage hideHeader />
+        </div>
+      ) : (
+        <>
+
 
       {/* Prominent Circuit Breaker Alert Banner */}
       {circuitBreakerTripped && (
@@ -361,12 +391,21 @@ export function LivePage() {
         }
       >
         <div className="grid gap-4 sm:grid-cols-3 [&>*]:min-w-0">
-          <Field label="Scenario">
-            <select className={inputCls} value={scenario} onChange={(e) => setScenario(e.target.value)}>
-              {meta?.scenarios.filter((s) => s.scenario_id !== "user_directed").map((s) => (
-                <option key={s.scenario_id} value={s.scenario_id}>{s.name}</option>
-              ))}
-            </select>
+          <Field label="Scenario" asDiv>
+            <CustomSelect
+              value={scenario}
+              onChange={(val) => setScenario(val)}
+              options={
+                meta?.scenarios
+                  .filter((s) => s.scenario_id !== "user_directed")
+                  .map((s) => ({
+                    value: s.scenario_id,
+                    label: s.name,
+                    description: s.description,
+                  })) ?? []
+              }
+              ariaLabel="Select scenario for live run"
+            />
           </Field>
           <Field label="Agents in Swarm" asDiv>
             <Segmented full value={count} onChange={setCount} options={[5, 10, 20].map((n) => ({ value: n as AgentCount, label: n }))} />
@@ -576,6 +615,8 @@ export function LivePage() {
           )}
         </Card>
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import type { OwaspCoverageResult } from "../types";
 import { THREAT_RULES } from "../lib/threatRules";
 import { ShieldCheck, AlertCircle, ArrowUpRight, CheckCircle2, Lock, ExternalLink } from "lucide-react";
 
-export function OwaspCoveragePage() {
+export function OwaspCoveragePage({ hideHeader = false }: { hideHeader?: boolean } = {}) {
   const [data, setData] = useState<OwaspCoverageResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,10 +42,12 @@ export function OwaspCoveragePage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        title="OWASP Agentic."
-        subtitle="Mapping SwarmGuard's 29 detection rules and pre-execution enforcement controls to the OWASP Top 10 for Agentic Applications (2026)."
-      />
+      {!hideHeader && (
+        <PageHeader
+          title="OWASP Agentic."
+          subtitle="Mapping SwarmGuard's 29 detection rules and pre-execution enforcement controls to the OWASP Top 10 for Agentic Applications (2026)."
+        />
+      )}
 
       {/* Top 3 Scorecard Tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

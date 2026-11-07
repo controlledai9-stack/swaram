@@ -1,5 +1,5 @@
 import { useAppState } from "../state";
-import { ChevronDown } from "lucide-react";
+import { CustomSelect } from "./CustomSelect";
 
 export interface NavItem {
   id: string;
@@ -9,12 +9,9 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "overview", path: "#/", label: "Overview" },
-  { id: "live", path: "#/live", label: "Live" },
+  { id: "live", path: "#/live", label: "Live Guard" },
   { id: "incidents", path: "#/incidents", label: "Incidents" },
-  { id: "swarm", path: "#/swarm", label: "Swarm" },
-  { id: "responses", path: "#/responses", label: "Responses" },
-  { id: "evaluation", path: "#/evaluation", label: "Evaluation" },
-  { id: "owasp", path: "#/owasp", label: "OWASP" },
+  { id: "assurance", path: "#/assurance", label: "Assurance" },
   { id: "pipeline", path: "#/pipeline/simulator", label: "Pipeline" },
 ];
 
@@ -23,7 +20,10 @@ export function GlobalNav({ currentRoute }: { currentRoute: string }) {
 
   const isCurrent = (id: string) => {
     if (id === "overview") return currentRoute === "" || currentRoute === "overview" || currentRoute === "/";
-    if (id === "pipeline") return currentRoute.startsWith("pipeline");
+    if (id === "live") return currentRoute.startsWith("live") || currentRoute.startsWith("swarm");
+    if (id === "incidents") return currentRoute.startsWith("incidents") || currentRoute.startsWith("responses");
+    if (id === "assurance") return currentRoute.startsWith("assurance") || currentRoute.startsWith("owasp") || currentRoute.startsWith("coverage") || currentRoute.startsWith("evaluation");
+    if (id === "pipeline") return currentRoute.startsWith("pipeline") || currentRoute.startsWith("simulator") || currentRoute.startsWith("collector") || currentRoute.startsWith("detection");
     return currentRoute.startsWith(id);
   };
 
@@ -65,25 +65,22 @@ export function GlobalNav({ currentRoute }: { currentRoute: string }) {
           })}
         </nav>
 
-        {/* Right Controls: Run Selector & Theme Toggle */}
+        {/* Right Controls: Run Selector & Health Indicator */}
         <div className="flex min-w-0 shrink items-center gap-2 sm:gap-3">
           {runs.length > 0 && (
-            <div className="relative min-w-0">
-              <select
+            <div className="w-[150px] sm:w-[260px]">
+              <CustomSelect
                 value={selectedRunId ?? ""}
-                onChange={(e) => selectRun(e.target.value)}
-                className="h-7 w-full min-w-[88px] max-w-[140px] sm:max-w-[320px] truncate cursor-pointer appearance-none rounded-full border border-[var(--hairline)]/60 bg-[var(--card)] pl-3 pr-7 text-[12px] font-medium text-[var(--text)] shadow-xs transition-colors hover:border-[var(--hairline)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                aria-label="Select Run"
-              >
-                {runs.map((r) => (
-                  <option key={r.run_id} value={r.run_id}>
-                    {r.run_id} ({r.scenario_id.replace(/_/g, " ")})
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={12}
-                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)]"
+                onChange={(val) => selectRun(val || null)}
+                options={runs.map((r) => ({
+                  value: r.run_id,
+                  label: `${r.run_id} (${r.scenario_id.replace(/_/g, " ")})`,
+                  description: `${r.agent_count} agents · ${r.stages?.detected ? "detected" : "in progress"}`,
+                }))}
+                size="sm"
+                variant="pill"
+                align="right"
+                ariaLabel="Select active run"
               />
             </div>
           )}

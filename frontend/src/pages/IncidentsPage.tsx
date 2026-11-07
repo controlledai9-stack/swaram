@@ -1,3 +1,5 @@
+import { ResponsesPage } from "./ResponsesPage";
+import { Segmented } from "../components/ui";
 import { useEffect, useState } from "react";
 import { useAppState, useRunData } from "../state";
 import { api } from "../api";
@@ -54,7 +56,13 @@ function AgentRoleBadge({
   );
 }
 
-export function IncidentsPage({ initialAlertId }: { initialAlertId?: string }) {
+export function IncidentsPage({ initialAlertId, initialView = "alerts" }: { initialAlertId?: string; initialView?: "alerts" | "reviews" } = {}) {
+  const [mainView, setMainView] = useState<"alerts" | "reviews">(initialView);
+
+  useEffect(() => {
+    setMainView(initialView);
+  }, [initialView]);
+
   const { selectedRunId } = useAppState();
   const alertsData = useRunData(api.alerts, selectedRunId);
   const normalizedData = useRunData(api.normalizedEvents, selectedRunId);
@@ -134,10 +142,32 @@ export function IncidentsPage({ initialAlertId }: { initialAlertId?: string }) {
     <div className="space-y-8">
       <PageHeader
         title="Incidents."
-        subtitle="Cross-agent threat detections backed by verifiable event chains."
+        subtitle="Forensic evidence chains, Bayesian threat attribution, and containment remediation queue."
+        actions={
+          <div className="flex items-center gap-3">
+            <Segmented
+              value={mainView}
+              onChange={(v) => {
+                setMainView(v);
+                if (v === "reviews") window.location.hash = "#/responses";
+                else window.location.hash = "#/incidents";
+              }}
+              options={[
+                { value: "alerts", label: "Forensic Alerts" },
+                { value: "reviews", label: "Remediation & Review Queue" },
+              ]}
+            />
+          </div>
+        }
       />
 
-      {!alerts.length && (
+      {mainView === "reviews" ? (
+        <div className="transition-opacity">
+          <ResponsesPage hideHeader />
+        </div>
+      ) : (
+        <>
+          {!alerts.length && (
         <Card>
           <Empty>
             {selectedRunId
@@ -521,6 +551,8 @@ export function IncidentsPage({ initialAlertId }: { initialAlertId?: string }) {
           </div>
         )}
       </Drawer>
+        </>
+      )}
 
       <Footnotes symbols={["†", "‡"]} />
     </div>
