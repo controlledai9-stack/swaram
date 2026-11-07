@@ -257,6 +257,12 @@ export function SimulatorPage() {
             />
           </Field>
 
+          <Field label={`Rounds: ${cfg.rounds ?? 2}`}
+            hint="Work rounds; the attack lands after round 1. More rounds let agents act on what they remembered (sleeper injections).">
+            <input type="range" min={2} max={8} step={1} value={cfg.rounds ?? 2}
+              onChange={(e) => set("rounds", Number(e.target.value))} className="w-full" aria-label="Rounds" />
+          </Field>
+
           <Field label="Gateway mode" hint={GATEWAY_HELP[cfg.gateway_mode]}>
             <select
               className={inputCls}
@@ -317,7 +323,7 @@ export function SimulatorPage() {
               ))}
             </select>
             {cfg.agent_backend === "gemini" && (
-              <div className="mt-3"><GeminiQuota agentCount={cfg.agent_count} agentMode={cfg.agent_mode ?? "scripted"} refreshKey={runs} onChange={setQuotaOk} /></div>
+              <div className="mt-3"><GeminiQuota agentCount={cfg.agent_count} agentMode={cfg.agent_mode ?? "scripted"} rounds={cfg.rounds ?? 2} refreshKey={runs} onChange={setQuotaOk} /></div>
             )}
           </Field>
 

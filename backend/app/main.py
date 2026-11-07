@@ -31,7 +31,18 @@ async def lifespan(app: FastAPI):
 
     get_pipeline().seed_defaults()
     notify.install(get_hub())  # opt-in: SWARMGUARD_WEBHOOK_URL
+    from app.services import siem
+
+    siem.install(get_hub(), lambda run_id: get_pipeline().alerts(run_id))  # opt-in: SWARMGUARD_SIEM_URL
+    from app.services import review
+
+    review.start_escalation_loop(get_store)  # overdue reviews are announced again
+    from app.services import egress_proxy
+
+    proxy = egress_proxy.start_from_env(get_pipeline())  # opt-in: SWARMGUARD_EGRESS_PROXY_PORT
     yield
+    if proxy:
+        proxy.stop()
 
 
 app = FastAPI(title="SwarmGuard", version="0.1.0", lifespan=lifespan)
@@ -41,6 +52,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    """Role check for every API call when SWARMGUARD_API_KEYS is set (see app/auth.py)."""
+    from app import auth
+
+    request.state.principal = None
+    if auth.enabled():
+        need = auth.required_role(request.method, request.url.path)
+        who = auth.identify(auth.key_from(request.headers, request.query_params))
+        if not auth.allowed(who, need):
+            status = 401 if who is None else 403
+            msg = ("Missing or unknown API key: send 'Authorization: Bearer <key>'." if who is None
+                   else f"The {who.role} key '{who.name}' can't do this (needs {need}).")
+            return JSONResponse(status_code=status, content={"detail": msg})
+        request.state.principal = who
+    return await call_next(request)
 
 
 @app.exception_handler(NotFound)
@@ -59,7 +88,16 @@ P = Depends(get_pipeline)
 # ------------------------------------------------------------------ meta
 @app.get("/api/health")
 def health(p: Pipeline = P) -> dict[str, Any]:
-    return {"ok": True, "storage": p.store.backend, "workspace": p.store.workspace}
+    from app import auth
+
+    return {"ok": True, "storage": p.store.backend, "workspace": p.store.workspace,
+            "auth": "on" if auth.enabled() else "off"}
+
+
+@app.get("/api/whoami")
+def whoami(request: Request) -> dict[str, Any]:
+    who = request.state.principal
+    return {"auth": who is not None, "name": who.name if who else None, "role": who.role if who else "local"}
 
 
 @app.get("/api/gemini/quota")
@@ -110,7 +148,12 @@ def run_normalized_events(run_id: str, p: Pipeline = P):
 
 
 @app.get("/api/runs/{run_id}/alerts")
-def run_alerts(run_id: str, p: Pipeline = P):
+def run_alerts(run_id: str, format: str | None = None, p: Pipeline = P):
+    """The run's alerts; ?format=ocsf returns them as OCSF Detection Findings for a SIEM."""
+    if format == "ocsf":
+        from app.services import siem
+
+        return siem.findings(p.alerts(run_id))
     return p.alerts(run_id)
 
 
@@ -162,6 +205,11 @@ async def live(ws: WebSocket):
 
     from app.services.live_hub import get_hub
 
+    from app import auth
+
+    if auth.enabled() and not auth.allowed(auth.identify(ws.query_params.get("key")), "viewer"):
+        await ws.close(code=1008)  # policy violation: no or wrong key
+        return
     await ws.accept()
     hub = get_hub()
     run_id = ws.query_params.get("run_id") or None
@@ -184,8 +232,32 @@ async def live(ws: WebSocket):
 def ingest_open(body: dict[str, Any], p: Pipeline = P) -> dict[str, Any]:
     from app.services import ingest
 
-    return ingest.open_session(p, body.get("name") or "external", body.get("agents") or [],
-                               body.get("live_guard", "contain"), float(body.get("pause_at", 0.6)))
+    out = ingest.open_session(p, body.get("name") or "external", body.get("agents") or [],
+                              body.get("live_guard", "contain"), float(body.get("pause_at", 0.6)),
+                              require_identity=bool(body.get("require_agent_identity")))
+    if body.get("mcp"):
+        ingest.SESSIONS[out["run_id"]].mcp = dict(body["mcp"])  # MCP gateway settings (services/mcp_gateway.py)
+        out["mcp"] = {a["agent_id"]: f"/api/ingest/{out['run_id']}/mcp/{a['agent_id']}" for a in body.get("agents") or []}
+    return out
+
+
+@app.post("/api/ingest/{run_id}/mcp/{agent_id}")
+async def ingest_mcp(run_id: str, agent_id: str, request: Request, p: Pipeline = P):
+    """MCP gateway: the agent's MCP client talks to this URL; tool calls are gated, then sent to the real server."""
+    import asyncio
+
+    from fastapi.responses import JSONResponse, Response
+
+    from app.services import ingest, mcp_gateway
+
+    s = ingest.session(run_id)
+    if not s.verify(agent_id, request.headers.get("x-agent-token")):
+        raise HTTPException(403, f"X-Agent-Token does not prove the caller is {agent_id}")
+    msg = await request.json()
+    body, headers = await asyncio.to_thread(mcp_gateway.handle, p, run_id, agent_id, msg, dict(request.headers))
+    if body is None:
+        return Response(status_code=202, headers=headers)
+    return JSONResponse(body, headers=headers)
 
 
 @app.post("/api/ingest/{run_id}/gate")
@@ -195,7 +267,29 @@ def ingest_gate(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
 
     if not body.get("agent_id"):
         raise HTTPException(400, "agent_id is required")
-    return ingest.session(run_id).gate(body)
+    s = ingest.session(run_id)
+    if not s.verify(body["agent_id"], body.get("agent_token")):
+        raise HTTPException(403, f"agent_token does not prove the caller is {body['agent_id']}")
+    return s.gate(body)
+
+
+@app.get("/api/ingest/{run_id}/control")
+def ingest_control(run_id: str) -> dict[str, Any]:
+    """Poll this: which agents are paused or have outbound transfers held right now, and why."""
+    from app.services import ingest
+
+    return ingest.control(run_id)
+
+
+@app.get("/api/egress-proxy")
+def egress_proxy_status() -> dict[str, Any]:
+    from app.services import egress_proxy
+
+    px = egress_proxy.PROXY
+    if px is None:
+        return {"running": False, "hint": "set SWARMGUARD_EGRESS_PROXY_PORT (and SWARMGUARD_EGRESS_ALLOW) to start it"}
+    return {"running": True, "host": px.host, "port": px.port, "mode": px.mode, "allow": sorted(px.allow),
+            "recent": px.decisions[-50:]}
 
 
 @app.post("/api/ingest/{run_id}/events")
@@ -208,6 +302,10 @@ def ingest_events(run_id: str, body: Any = Body(...), format: str | None = None,
         events, _ = convert(format, body, run_id)
     else:
         events = body if isinstance(body, list) else [body]
+    s = ingest.session(run_id)
+    bad = sorted({str(e.get("agent_id")) for e in events if not s.verify(e.get("agent_id"), e.get("agent_token"))})
+    if bad:
+        raise HTTPException(403, f"agent_token missing or wrong for {', '.join(bad)}: events rejected")
     return ingest.add_events(p, run_id, events)
 
 
@@ -235,12 +333,21 @@ def reviews(status: str | None = None, run_id: str | None = None, p: Pipeline = 
     return review.items(p.store, status, run_id)
 
 
-@app.post("/api/reviews/{review_id}")
-def decide_review(review_id: str, body: dict[str, Any], p: Pipeline = P) -> dict[str, Any]:
-    """{"decision": "release" | "confirm", "note": "..."}"""
+@app.post("/api/reviews/escalate")
+def escalate_reviews(minutes: float = 15.0, p: Pipeline = P) -> list[dict[str, Any]]:
+    """Mark pending reviews older than `minutes` as overdue and announce them (also runs every minute on its own)."""
     from app.services import review
 
-    return review.decide(p.store, review_id, body.get("decision", ""), body.get("note"))
+    return review.escalate(p.store, minutes)
+
+
+@app.post("/api/reviews/{review_id}")
+def decide_review(review_id: str, body: dict[str, Any], request: Request, p: Pipeline = P) -> dict[str, Any]:
+    """{"decision": "release" | "confirm", "note": "..."}. With API keys on, the key's name is recorded as who decided."""
+    from app.services import review
+
+    who = request.state.principal
+    return review.decide(p.store, review_id, body.get("decision", ""), body.get("note"), who.name if who else body.get("by"))
 
 
 @app.get("/api/runs/{run_id}/integrity")
@@ -345,6 +452,14 @@ def detection_baseline(p: Pipeline = P):
 def train_detection_baseline(req: BaselineTrainRequest, p: Pipeline = P):
     """Retrain from synthetic normal runs, or fold in one run confirmed clean (continual learning)."""
     return p.train_baseline(req)
+
+
+@app.get("/api/coverage/owasp")
+def owasp_coverage() -> dict[str, Any]:
+    """How SwarmGuard's rules and controls cover the OWASP Top 10 for Agentic Applications."""
+    from app.modules.detection.owasp import coverage
+
+    return coverage()
 
 
 @app.get("/api/detection-rules")

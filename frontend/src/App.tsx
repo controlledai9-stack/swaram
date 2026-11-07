@@ -10,6 +10,7 @@ import { DetectionPage } from "./pages/DetectionPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 import { PipelinePage } from "./pages/PipelinePage";
 import { LivePage } from "./pages/LivePage";
+import { ApiKeyPrompt } from "./components/ApiKeyPrompt";
 import { useAppState } from "./state";
 
 export function useHashRoute(): string {
@@ -95,6 +96,7 @@ export default function App() {
       <GlobalNav currentRoute={route} />
 
       <main className={`mx-auto ${cleanRoute === "swarm" ? "max-w-[1280px]" : "max-w-[1120px]"} px-6 py-10 transition-all`}>
+        <ApiKeyPrompt />
         {apiError && (
           <div className="mb-6">
             <Banner kind="error">

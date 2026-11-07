@@ -17,11 +17,47 @@ alone, because modules only talk through the shared data contracts and the store
 | 5 | Dashboard & Evaluation | `backend/app/modules/evaluation/` | `DashboardPage.tsx` | all of the above | `evaluations` |
 
 The stack is React + Vite + TypeScript + Tailwind for the frontend, FastAPI + Pydantic + NetworkX for the backend, and Firestore with a SQLite fallback for storage.
-No local LLM is needed. The model API is optional and capped.
+No model is needed: everything runs offline with scripted agents, and real models are optional.
+
+## What it does today
+
+- **AI mode**: each agent's model (Gemini, any OpenAI-compatible API, or a local Ollama model) plans and acts on
+  its own; an AI planner assigns the work; agents remember earlier rounds. Attacks are never asked of a model: they are
+  scripted, or planted as prompt injections (16 of them, from phishing to a self-spreading worm, a poisoned memory and a sleeper note);
+  internal-goal cases test agents with a goal of their own and no attacker.
+- **Threat Detection**: 28 rules (SG-001 to SG-028), a learned behavioural baseline, Bayesian risk with explanations,
+  and an accuracy benchmark (30 attacks, 14 benign look-alikes; precision 1.0). A second, independent evidence source
+  (egress proxy, audit and broker logs) keeps detection working when the agent log loses events.
+- **Live guard**: detection while a run happens. It refuses any out-of-policy action before it runs (whatever the
+  cause: injection, a goal of the agent's own, a bug), blocks a hijacked agent before its first harmful action,
+  quarantines impersonated messages, applies the response policy as alerts fire, and pushes everything to the UI over a
+  WebSocket (`docs/live-stream.md`).
+- **Security Response**: a review queue (release / confirm, escalation, who decided), operator controls (pause an agent,
+  stop a run), webhook notifications, honest records (`blocked` only when an action was really denied), and an egress
+  proxy that enforces pauses and holds at the network even when the agent platform doesn't cooperate.
+- **Real agents**: a live ingest API with a pre-execution gate, an MCP gateway, a Python SDK and LangChain handler (`sdk/python`),
+  per-agent identity tokens, OpenTelemetry and LangSmith importers, personal-data redaction, and a tamper-evident
+  hash-chained log.
+- **Injection classifier** (SG-028): a model trained on public datasets scores every untrusted input; measured on
+  datasets it never saw (`docs/injection-classifier.md`).
+- **Operations**: OCSF alert export for SIEMs, OWASP Agentic Top 10 coverage map, API keys with roles, a Gemini quota meter that refuses runs that won't fit, a dataset generator, an
+  adaptive injection fuzzer, an internal-goal fuzzer (agents breaking policy for a goal of their own, no attacker), a
+  real-agent demo enforced at the network (`scripts/demo_real_agents.py`), and CI on every pull request.
+
+| Doc | What's in it |
+|---|---|
+| `docs/threat-model.md` | Every threat, rule and measured result |
+| `docs/live-stream.md` | The live stream contract, operator controls, ingest API |
+| `docs/owasp-agentic.md` | Coverage of the OWASP Top 10 for Agentic Applications |
+| `docs/injection-classifier.md` | The trained injection classifier: data, licenses, measured results |
+| `sdk/python/README.md` | Connecting an agent platform (SDK, LangChain) |
+| `docs/collector-and-response.md` | Collector and response features |
+| `docs/dataset-generator.md` | Generating AI-mode datasets |
+| `backend/app/modules/simulator/README.md` | Simulator, AI mode, injections, providers, quota |
 
 ## Setup
 
-You need Python 3.11+ and Node 18+.
+You need Python 3.12+ (development and CI use 3.14) and Node 20+ (CI uses 24).
 
 ```bash
 cd backend
@@ -33,7 +69,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev                      # http://localhost:5173 (proxies /api to :8000)
 ```
 
@@ -50,9 +86,21 @@ Copy `.env.example` to `backend/.env`. Every variable is optional.
 | `SWARMGUARD_SQLITE_PATH` | `backend/data/swarmguard.db` | Location of the SQLite fallback database. |
 | `FIREBASE_CREDENTIALS` | none | Path to a service-account JSON file. Server-side only. |
 | `FIREBASE_PROJECT_ID` | none | Firebase project id. |
+| `SWARMGUARD_API_KEYS` | none | **Login.** `name:key:role,...` with roles `viewer`, `operator`, `admin`, `agent`. Unset = no login (local only). See `backend/app/auth.py`. |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | none / `gemini-3.5-flash-lite` | The `gemini` agent backend. |
+| `GEMINI_DAILY_BUDGET` / `GEMINI_MAX_RPM` | `480` / `14` | Local caps under Google's free tier (500/day, 15/min). Usage is shared across processes in `backend/data/gemini_quota.json`. |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` | none | The `openai` backend: any OpenAI-compatible API (OpenAI, Groq, OpenRouter). |
+| `OLLAMA_MODEL` / `OLLAMA_BASE_URL` | `ministral-3:3b-...` / `http://localhost:11434/v1` | The `ollama` backend: local models, no key, no quota. |
 | `ANTHROPIC_API_KEY` | none | Turns on the optional `anthropic` agent backend. |
-| `SWARMGUARD_LLM_MODEL` | `claude-haiku-5-5` | Model used for message text. |
-| `SWARMGUARD_LLM_MAX_CALLS` | `20` | Maximum model calls per run. After that, deterministic templates are used. |
+| `SWARMGUARD_LLM_MODEL` | `claude-haiku-5-5` | Model used by the `anthropic` backend. |
+| `SWARMGUARD_LLM_MAX_CALLS` | `80` | Maximum model calls per run. After that, agents fall back to scripted work. |
+| `SWARMGUARD_WEBHOOK_URL` | none | Slack / Discord / Teams webhook for containments, quarantines and overdue reviews. |
+| `SWARMGUARD_REVIEW_ESCALATE_MIN` | `15` | Minutes before a pending review is escalated. |
+| `SWARMGUARD_REDACT_PII` | `1` | Replace emails, phones, cards and SSNs in stored events with pseudonyms. |
+| `SWARMGUARD_EGRESS_PROXY_PORT` | none | Start the egress proxy: blocks paused / held agents and off-allowlist hosts at the network, no agent cooperation needed (`docs/live-stream.md`). |
+| `SWARMGUARD_EGRESS_ALLOW` / `SWARMGUARD_EGRESS_MODE` | none / `enforce` | Hosts agents may reach; `monitor` flags instead of refusing. |
+| `SWARMGUARD_SIEM_URL` / `SWARMGUARD_SIEM_AUTH` | none | Push each finished run's alerts as OCSF findings to a SIEM. |
+| `SWARMGUARD_CODE_EXEC` | `sandbox` | `off` never runs agent-written code. |
 | `SWARMGUARD_CORS_ORIGINS` | `http://localhost:5173,…` | Allowed browser origins. |
 
 ### Enabling Firestore later
@@ -63,7 +111,7 @@ Copy `.env.example` to `backend/.env`. Every variable is optional.
 4. Deploy `firestore.rules`. It denies all direct client access, so all writes go through FastAPI using the Admin SDK and credentials never reach the browser.
 
 Data lives under `workspaces/{SWARMGUARD_WORKSPACE}/{collection}/{doc_id}` in these collections:
-`scenarios, runs, agents, raw_events, normalized_events, alerts, response_actions, detection_rules, response_policies, evaluations`.
+`scenarios, runs, agents, raw_events, normalized_events, alerts, response_actions, detection_rules, response_policies, evaluations, reviews`.
 Every run-scoped document carries `run_id`, which is how the modules index and query data.
 
 ## Tests
@@ -83,7 +131,12 @@ cd frontend
 npm run typecheck
 ```
 
-There are 58 backend tests: simulator, collector, detection, response, evaluation, storage and the API. The API tests include the full Definition-of-Done flow and recovery after a reload. The frontend tests cover export/parse and formatting helpers.
+There are about 700 backend tests (simulator, AI mode with fake models, injections, collector, detection, the
+benchmark, live guard, streaming, ingest, response, auth and the API) and frontend tests for helpers and components.
+GitHub Actions runs all of them, plus the typecheck and a production build, on every pull request
+(`.github/workflows/ci.yml`). No test calls a real model.
+
+Detection accuracy: `python scripts/benchmark_detection.py` (add `--sensors` for the two-source setup).
 
 To regenerate fixtures from the real modules:
 

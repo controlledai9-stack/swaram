@@ -1,3 +1,4 @@
+import { AUTH_REQUIRED, authHeaders } from "./lib/apiKey";
 import type {
   Agent, AgentAssessment, Alert, AuditItem, BaselineSummary, GeminiQuotaStatus, ReviewItem, BenchmarkResult, LiveReport, ReplayCase, CollectionResult, Dashboard, DetectionResult, DetectionRule, EvaluationResult, Meta, ModuleInfo,
   NormalizedEvent, RawEvent, ResponseAction, ResponsePolicy, ResponseResult, Run, ScenarioConfig, SimulationResult,
@@ -15,7 +16,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(`/api${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers ?? {}) },
     });
   } catch {
     throw new ApiError(0, "Cannot reach the SwaramGuard API. Is the backend running on port 8000?");
@@ -27,6 +28,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const msg = typeof detail === "string" ? detail
       : Array.isArray(detail) ? detail.map((d: { loc?: unknown[]; msg: string }) => `${(d.loc ?? []).join(".")}: ${d.msg}`).join("; ")
       : res.statusText;
+    if (res.status === 401 || res.status === 403) window.dispatchEvent(new CustomEvent(AUTH_REQUIRED, { detail: msg }));
     throw new ApiError(res.status, msg);
   }
   return body as T;
@@ -36,7 +38,7 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 const put = <T>(path: string, body: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) });
 
 export const api = {
-  health: () => request<{ ok: boolean; storage: string; workspace: string }>("/health"),
+  health: () => request<{ ok: boolean; storage: string; workspace: string; auth?: "on" | "off" }>("/health"),
   meta: () => request<Meta>("/meta"),
   moduleInfo: (name: string) => request<ModuleInfo>(`/modules/${name}`),
 
@@ -63,8 +65,8 @@ export const api = {
   baseline: () => request<BaselineSummary>("/detection/baseline"),
   geminiQuota: () => request<GeminiQuotaStatus>("/gemini/quota"),
   reviews: (status?: string) => request<ReviewItem[]>(`/reviews${status ? `?status=${status}` : ""}`),
-  decideReview: (id: string, decision: "release" | "confirm", note?: string) =>
-    request<ReviewItem>(`/reviews/${id}`, { method: "POST", body: JSON.stringify({ decision, note }) }),
+  decideReview: (id: string, decision: "release" | "confirm", note?: string, by?: string) =>
+    request<ReviewItem>(`/reviews/${id}`, { method: "POST", body: JSON.stringify({ decision, note, by }) }),
   operateAgent: (runId: string, agentId: string, action: "pause" | "hold_egress", note?: string) =>
     request<{ result: string }>(`/live/${runId}/agents/${agentId}`, { method: "POST", body: JSON.stringify({ action, note }) }),
   stopRun: (runId: string, note?: string) =>

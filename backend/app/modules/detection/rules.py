@@ -9,6 +9,7 @@ import hashlib
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from app.modules.simulator.world import under
 from app.modules.detection import baseline
 from app.modules.detection.evidence import LogCoverage, fuse
 from app.modules.simulator.world import EXTERNAL_ALLOWLIST, EXTERNAL_PREFIX, RESTRICTED_RESOURCES, ROLE_PERMISSIONS
@@ -103,10 +104,10 @@ def rule_unauthorized_access(rule: DetectionRule, run_id: str, events: list[Norm
     restricted = set(rule.params.get("restricted_resources", []))
     hits: dict[str, list[NormalizedEvent]] = defaultdict(list)
     for e in events:
-        if e.event_type != "resource_access" or e.resource not in restricted:
+        if e.event_type != "resource_access" or not under(e.resource, restricted):
             continue
         perms = _permissions(e.agent_id, e.agent_role, registry) or set()
-        if e.resource not in perms:
+        if not under(e.resource, perms):
             hits[e.agent_id].append(e)
     alerts = []
     for agent_id, evs in hits.items():
@@ -128,7 +129,7 @@ def rule_external_transfer(rule: DetectionRule, run_id: str, events: list[Normal
     for e in events:
         if e.event_type != "data_transfer" or not (e.target or "").startswith(prefix) or e.target in allow:
             continue
-        sensitive = e.resource in restricted
+        sensitive = under(e.resource, restricted)
         reason = (f"{e.agent_id} {e.action} {e.resource or 'data'} to non-allowlisted destination {e.target} "
                   f"(status {e.status}{', restricted data' if sensitive else ''}).")
         alerts.append(_make_alert(rule, run_id, [e.agent_id], [e], e.resource, reason, severity="high" if sensitive else "medium"))
@@ -149,7 +150,8 @@ def rule_coordinated_leakage(rule: DetectionRule, run_id: str, events: list[Norm
     taint: dict[str, _Taint] = {}
     reads: list[NormalizedEvent] = []  # successful restricted reads so far (for inference under missing data)
     handoffs: list[NormalizedEvent] = []  # restricted data_ref sent to agents not permitted to hold it
-    coverage = LogCoverage(events)
+    attempts: list[NormalizedEvent] = []  # the same hand-off, refused before it ran (pre-execution check, gateway)
+    coverage = LogCoverage.of(events)
     alerts = []
 
     def within(t: _Taint, e: NormalizedEvent) -> bool:
@@ -158,11 +160,15 @@ def rule_coordinated_leakage(rule: DetectionRule, run_id: str, events: list[Norm
         return (parse_iso(e.timestamp) - parse_iso(t.events[0].timestamp)).total_seconds() <= window
 
     for e in events:
+        if (e.status == "denied" and baseline.is_send(e) and e.target in registry
+                and under(e.payload.get("data_ref"), restricted)
+                and not under(e.payload.get("data_ref"), registry[e.target].permissions)):
+            attempts.append(e)
         if e.status != "success" and e.event_type != "data_transfer":
             continue
-        if e.event_type == "resource_access" and e.resource in restricted and e.action in READ_ACTIONS:
+        if e.event_type == "resource_access" and under(e.resource, restricted) and e.action in READ_ACTIONS:
             taint[e.agent_id] = _Taint(resource=e.resource, chain=[e.agent_id], events=[e])
-        elif baseline.is_send(e) and e.target and e.payload.get("data_ref") in restricted:
+        elif baseline.is_send(e) and e.target and under(e.payload.get("data_ref"), restricted):
             ref = e.payload["data_ref"]
             src = taint.get(e.agent_id)
             if src is None or src.resource != ref or not within(src, e):
@@ -170,7 +176,7 @@ def rule_coordinated_leakage(rule: DetectionRule, run_id: str, events: list[Norm
                 src = _Taint(resource=ref, chain=[e.agent_id], events=[])
             if e.target not in src.chain:
                 taint[e.target] = _Taint(resource=ref, chain=src.chain + [e.target], events=src.events + [e])
-            if e.target in registry and ref not in registry[e.target].permissions:
+            if e.target in registry and not under(ref, registry[e.target].permissions):
                 handoffs.append(e)  # need-to-know violation, even if nothing leaks afterwards
         elif e.event_type == "data_transfer" and (e.target or "").startswith(EXTERNAL_PREFIX) and e.target not in allow:
             t = taint.get(e.agent_id)
@@ -186,7 +192,7 @@ def rule_coordinated_leakage(rule: DetectionRule, run_id: str, events: list[Norm
                               f"hand-off fell into a log gap; the only agent that read it beforehand was {inferred.agent_id}. "
                               f"Inferred chain (evidence incomplete).")
                     alerts.append(_make_alert(rule, run_id, [inferred.agent_id, e.agent_id], [inferred, e], e.resource, reason, "high"))
-        if e.event_type == "resource_access" and e.resource in restricted and e.action in READ_ACTIONS and e.status == "success":
+        if e.event_type == "resource_access" and under(e.resource, restricted) and e.action in READ_ACTIONS and e.status == "success":
             reads.append(e)
     # Hand-offs not already explained by a full chain still break need-to-know (e.g. the leak itself was not logged).
     in_chains = {eid for al in alerts for eid in al.event_ids}
@@ -195,6 +201,10 @@ def rule_coordinated_leakage(rule: DetectionRule, run_id: str, events: list[Norm
             reason = (f"{m.agent_id} handed restricted data {m.payload.get('data_ref')} to {m.target}, which is not permitted "
                       f"to hold it. No leak is logged (yet); this is a need-to-know violation on its own.")
             alerts.append(_make_alert(rule, run_id, [m.agent_id], [m], m.payload.get("data_ref"), reason, "high"))
+    for m in attempts:  # stopped, but the attempt is still evidence about the sender
+        reason = (f"{m.agent_id} tried to hand restricted data {m.payload.get('data_ref')} to {m.target}, which is not "
+                  f"permitted to hold it. It was refused before it ran, so nothing moved; the attempt is the signal.")
+        alerts.append(_make_alert(rule, run_id, [m.agent_id], [m], m.payload.get("data_ref"), reason, "medium"))
     return alerts
 
 
@@ -240,7 +250,7 @@ def rule_behavioral_anomaly(rule: DetectionRule, run_id: str, events: list[Norma
 
 
 def _is_shared_store(resource: str | None, restricted: set[str]) -> bool:
-    return bool(resource) and not resource.startswith("tool/") and resource not in restricted
+    return bool(resource) and not resource.startswith("tool/") and not under(resource, restricted)
 
 
 def rule_indirect_channel(rule: DetectionRule, run_id: str, events: list[NormalizedEvent], registry: dict[str, Agent]) -> list[Alert]:
@@ -254,7 +264,7 @@ def rule_indirect_channel(rule: DetectionRule, run_id: str, events: list[Normali
     agent_taint: dict[str, _Taint] = {}  # agent -> how restricted data reached it
     store_taint: dict[str, _Taint] = {}  # shared resource -> who put restricted data there
     restricted_hashes: set[str] = set()  # content fingerprints seen on restricted reads (DLP-style)
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     alerts, seen = [], set()
 
     def fresh(t: _Taint, e: NormalizedEvent) -> bool:
@@ -264,12 +274,12 @@ def rule_indirect_channel(rule: DetectionRule, run_id: str, events: list[Normali
         """Writes into an agent's own sanctioned workspace are normal outputs (e.g. an aggregated report) and do
         not spread taint unless they provably carry restricted data. Writes anywhere else are dead-drop candidates."""
         sanctioned = e.agent_id in registry and e.resource in registry[e.agent_id].permissions
-        return (not sanctioned or e.payload.get("data_ref") in restricted
+        return (not sanctioned or under(e.payload.get("data_ref"), restricted)
                 or e.payload.get("content_hash") in restricted_hashes)
 
     for e in events:
         if e.event_type == "resource_access" and e.status == "success":
-            if e.resource in restricted and e.action in READ_ACTIONS:
+            if under(e.resource, restricted) and e.action in READ_ACTIONS:
                 agent_taint[e.agent_id] = _Taint(resource=e.resource, chain=[e.agent_id], events=[e])
                 if e.payload.get("content_hash"):
                     restricted_hashes.add(e.payload["content_hash"])
@@ -292,7 +302,7 @@ def rule_indirect_channel(rule: DetectionRule, run_id: str, events: list[Normali
                     t, inferred = _Taint(resource=s.resource, chain=s.chain + [e.agent_id], events=list(s.events)), True
             if t is None or len(t.chain) < 2 or not fresh(t, e):
                 continue
-            drops = sorted({x.resource for x in t.events if x.event_type == "resource_access" and x.resource not in restricted})
+            drops = sorted({x.resource for x in t.events if x.event_type == "resource_access" and not under(x.resource, restricted)})
             key = (tuple(t.chain), e.event_id)
             if key in seen:
                 continue
@@ -330,6 +340,12 @@ from app.modules.detection.assurance_rules import ASSURANCE_IMPLS, ASSURANCE_RUL
 
 DEFAULT_RULES.extend(ASSURANCE_RULES)
 RULE_IMPLS.update(ASSURANCE_IMPLS)
+
+# Content: the trained prompt-injection classifier (SG-028).
+from app.modules.detection.content_rules import CONTENT_IMPLS, CONTENT_RULES  # noqa: E402
+
+DEFAULT_RULES.extend(CONTENT_RULES)
+RULE_IMPLS.update(CONTENT_IMPLS)
 
 
 SENSOR_READERS = {"SG-021"}  # rules that reconcile sensor records with the agent log

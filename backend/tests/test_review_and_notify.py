@@ -34,7 +34,9 @@ def test_contained_agents_become_review_items(pipeline):
 
     items = review.items(pipeline.store, "pending", "run-rev00001")
     kinds = {(i["role"], i["kind"]) for i in items}
-    assert ("coder", "held_egress") in kinds and ("coder", "paused_agent") in kinds and ("analyst", "paused_agent") in kinds
+    # Both culprits' first harmful actions are refused before they run and their egress held; the coder is also
+    # paused by live detection. Every containment is a review item.
+    assert {("analyst", "held_egress"), ("coder", "held_egress"), ("coder", "paused_agent")} <= kinds
     assert all(i["explanation"] for i in items)
 
 
@@ -137,3 +139,27 @@ def test_a_failing_webhook_never_breaks_a_run():
     hub.publish("containment", {"agent_id": "a1", "scope": "agent"}, "run-1")
     n.queue.join()
     assert n.sent == 0  # logged, swallowed
+
+
+# ------------------------------------------------------------ escalation and who decided
+def test_overdue_reviews_are_escalated_once_and_decisions_record_who(pipeline):
+    from app.services import review
+    from app.services.live_hub import get_hub
+    from app.services.notify import summary
+
+    pipeline.simulate(ScenarioConfig(scenario_id="sg003_leak_chain", live_guard="contain", persist=True), run_id="run-rev00009")
+    items = review.items(pipeline.store, "pending", "run-rev00009")
+    assert review.escalate(pipeline.store, after_minutes=15) == []  # just created: not overdue yet
+    later = "2099-01-01T00:00:00.000Z"
+    due = review.escalate(pipeline.store, after_minutes=15, now=later)
+    assert {i["review_id"] for i in due} == {i["review_id"] for i in items}
+    assert review.escalate(pipeline.store, after_minutes=15, now=later) == []  # announced once, not every minute
+    msg = next(m for m in reversed(get_hub().history) if m["type"] == "review" and m["data"]["action"] == "escalated")
+    assert summary(msg).startswith("SwarmGuard: OVERDUE review")
+    done = review.decide(pipeline.store, items[0]["review_id"], "confirm", "checked the chain", by="Aarya")
+    assert done["decided_by"] == "Aarya" and done["escalated_at"]
+    assert review.decide(pipeline.store, items[1]["review_id"], "confirm")["decided_by"] == "unknown"
+
+
+def test_escalate_endpoint(client):
+    assert client.post("/api/reviews/escalate", params={"minutes": 0}).status_code == 200

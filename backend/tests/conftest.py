@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 os.environ["GEMINI_QUOTA_FILE"] = "off"  # tests must never touch the real Gemini usage file
+os.environ["SWARMGUARD_API_KEYS"] = ""  # auth off unless a test turns it on (a developer's .env may set keys)
 
 import json
 from datetime import datetime, timezone

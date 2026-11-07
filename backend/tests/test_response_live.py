@@ -36,8 +36,15 @@ def _guarded_run(pipeline, policy, scenario="sg002_external_leak"):
 
 def test_the_response_policy_acts_live_as_alerts_fire(pipeline):
     default = _guarded_run(pipeline, ResponsePolicy())
-    assert any(r["rule_id"] == "SG-002" and r["decision"] == "block" and r["applied"] == ["egress held"] for r in default.responses)
-    assert any(c.trigger == "policy" and c.rule_id == "SG-002" for c in default.held.values())
+    # The upload is refused before it runs and the agent's egress held at once (pre-execution check); the policy's
+    # "block" for the SG-002 alert then finds it already held and records the decision.
+    assert any(r["rule_id"] == "SG-002" and r["decision"] == "block" and r["applied"] in (["egress held"], ["recorded"])
+               for r in default.responses)
+    assert any(c.trigger in ("policy", "policy_check") for c in default.held.values())
+    no_gate = LiveGuard(pipeline.rules(), "contain", policy=ResponsePolicy(), policy_gate=False)
+    run_simulation(ScenarioConfig(scenario_id="sg002_external_leak", persist=False), live=no_gate)
+    assert any(r["rule_id"] == "SG-002" and r["applied"] == ["egress held"] for r in no_gate.responses)
+    assert any(c.trigger == "policy" and c.rule_id == "SG-002" for c in no_gate.held.values())
     relaxed = _guarded_run(pipeline, ResponsePolicy(rule_overrides={"SG-002": "alert"}))
     sg002 = [r for r in relaxed.responses if r["rule_id"] == "SG-002"]
     assert sg002 and sg002[0]["applied"] == ["recorded"]  # the policy decides; "alert" contains nothing

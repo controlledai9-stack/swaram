@@ -38,6 +38,7 @@ class Scenario(BaseModel):
     description: str
     malicious_roles: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    min_rounds: int = 2  # e.g. a sleeper injection needs a round to plant and a later one to trigger
 
 
 class ScenarioConfig(BaseModel):
@@ -51,6 +52,7 @@ class ScenarioConfig(BaseModel):
     sensors: bool = Field(False, description="Also emit independent resource-side records (egress proxy, broker log, "
                           "resource/tool audit) for each executed action; dropped independently of the agent log")
     agent_backend: str = Field("deterministic", description="Adapter that writes message text")
+    rounds: int = Field(2, ge=2, le=8, description="Work rounds; the attack or injection lands after round 1")
     agent_mode: Literal["scripted", "autonomous"] = Field(
         "scripted", description="scripted: fixed normal work; autonomous: each worker's model decides its actions")
     auto_pipeline: bool = Field(False, description="Run collect -> detect -> respond automatically")

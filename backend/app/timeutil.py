@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import lru_cache
 
 
 def utcnow() -> datetime:
@@ -17,6 +18,7 @@ def now_iso() -> str:
     return iso(utcnow())
 
 
+@lru_cache(maxsize=65536)
 def parse_iso(value: str) -> datetime:
     s = value.strip()
     if s.endswith("Z"):

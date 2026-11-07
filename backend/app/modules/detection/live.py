@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.modules.simulator.world import under
 from app.modules.collector.normalizer import collect
 from app.modules.detection.advanced_rules import _ingests, copies, distinctive_tokens, out_of_policy, provenance_marked, shingles
 from app.modules.detection.assurance_rules import sender_verified
@@ -33,12 +34,18 @@ END_OF_RUN_RULES = {"SG-010"}
 
 
 class LiveGuard:
-    def __init__(self, rules: list[DetectionRule], mode: str = "contain", pause_at: float = 0.6, policy=None):
+    def __init__(self, rules: list[DetectionRule], mode: str = "contain", pause_at: float = 0.6, policy=None,
+                 policy_gate: bool = True):
         self.rules = [r for r in rules if r.rule_id not in END_OF_RUN_RULES]
         # Response policy applied live (Security Response): each new alert's decision (pause / block) is enforced on
         # the agents it names as the alert fires, not only after the run.
         self.policy = policy
         self.responses: list[dict] = []
+        # Pre-execution policy check: in contain mode, an action outside the agent's own policy is refused before it
+        # runs, whoever the agent is and whatever its reason (injection, a goal of its own, a bug). The tripwire above
+        # it still pauses agents that just read untrusted content; this one only refuses the single action.
+        self.policy_gate = policy_gate
+        self.policy_blocks: list[dict] = []
         self.mode = mode
         self.pause_at = pause_at
         self.run_id = ""
@@ -54,6 +61,8 @@ class LiveGuard:
         self.registry: dict[str, Agent] = {}
         hijack = next((r for r in rules if r.rule_id == "SG-012"), None)
         self.hijack_params = dict(hijack.params) if hijack else {}
+        content = next((r for r in rules if r.rule_id == "SG-028" and r.enabled), None)
+        self.content_params = dict(content.params) if content else {}  # classifier quarantine (opt-in)
         self.exposure_steps = int(self.hijack_params.get("max_steps", 5))
         self.exposed: dict[str, dict] = {}  # agent -> {"left": steps, "source": what it ingested}
         self.sends: dict[str, NormalizedEvent] = {}  # message_id -> send event (to verify claimed senders)
@@ -72,7 +81,8 @@ class LiveGuard:
         self.registry = {a.agent_id: a for a in agents}
 
     def gate(self, agent_id: str, event_type: str | None = None, target: str | None = None, *, action: str | None = None,
-             resource: str | None = None, payload: dict | None = None, sequence: int = 0, timestamp: str = "") -> str | None:
+             resource: str | None = None, payload: dict | None = None, sequence: int = 0, timestamp: str = "",
+             policy_check: bool = True) -> str | None:
         """Called BEFORE an action executes. A reason means: deny it."""
         if self.mode != "contain":
             return None
@@ -93,6 +103,9 @@ class LiveGuard:
                                      "sequence": sequence})
             return (f"quarantined before delivery: claims to be from {payload['claimed_sender']} but the broker has no "
                     f"such message (impersonated sender)")
+        withheld = self._classifier_quarantine(agent_id, resource, payload, sequence)
+        if withheld:
+            return withheld
         exposure = self.exposed.get(agent_id)
         if exposure and self.hijack_params and event_type:
             pending = SimpleNamespace(agent_id=agent_id, event_type=event_type, action=action or "", target=target,
@@ -108,7 +121,47 @@ class LiveGuard:
                     explanation=f"tried {what} right after ingesting untrusted content ({exposure['source']}): likely "
                                 f"prompt injection, stopped before it ran")
                 return f"blocked before execution: out-of-policy action right after untrusted input ({exposure['source']})"
+        if policy_check and self.policy_gate and event_type and event_type != "observation" and action != "receive":
+            pending = SimpleNamespace(agent_id=agent_id, event_type=event_type, action=action or "", target=target,
+                                      resource=resource, payload=payload or {}, status="success")
+            if out_of_policy(pending, self.registry, self.hijack_params):
+                what = " ".join(x for x in (action or event_type, resource or (payload or {}).get("data_ref"),
+                                            f"-> {target}" if target else None) if x)
+                self.policy_blocks.append({"agent_id": agent_id, "role": self.roles.get(agent_id), "action": what,
+                                           "sequence": sequence, "timestamp": timestamp})
+                # An agent that tried this may try something else: hold its outbound transfers until a human
+                # reviews it (it can keep doing permitted internal work). Shows up as a containment and a review item.
+                if agent_id in self.held:
+                    self.held[agent_id].blocked_actions += 1
+                elif agent_id not in self.released:
+                    self.held[agent_id] = Containment(
+                        agent_id=agent_id, role=self.roles.get(agent_id), scope="egress", trigger="policy_check",
+                        paused_at_sequence=sequence, paused_at=timestamp, risk=0.0, blocked_actions=1,
+                        explanation=f"tried {what}, outside its policy: refused before it ran; outbound transfers held "
+                                    f"until reviewed")
+                return (f"blocked before execution: {what} is outside the {self.roles.get(agent_id) or 'agent'}'s "
+                        f"policy (pre-execution check)")
         return None
+
+    def _classifier_quarantine(self, agent_id: str, resource: str | None, payload: dict | None, sequence: int) -> str | None:
+        """SG-028 in contain mode (quarantine_live): withhold untrusted content the classifier scores as an injection,
+        so the agent never reads it. Off by default: a linear classifier has false positives, and withholding a
+        legitimate email is itself a cost."""
+        if not (self.content_params.get("quarantine_live") and payload and payload.get("untrusted") is True):
+            return None
+        text = payload.get("content")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        from app.modules.detection import injection_classifier as clf
+
+        if not clf.available():
+            return None
+        score = clf.cached_score(text)
+        if score < float(self.content_params.get("quarantine_threshold", 0.9)):
+            return None
+        self.quarantined.append({"agent_id": agent_id, "resource": resource, "claimed_sender": None,
+                                 "sequence": sequence, "reason": "classifier", "score": round(score, 3)})
+        return f"quarantined before delivery: likely prompt injection (classifier score {score:.2f})"
 
     def observe(self, raw: RawEvent) -> None:
         normalized = collect([raw.model_dump(mode="json")], run_id=self.run_id, agents=self.agents).events
@@ -195,7 +248,7 @@ class LiveGuard:
             return
         ref, target = e.payload.get("data_ref"), e.target
         recipient = self.registry.get(target or "")
-        if (ref in self.restricted and recipient and ref not in recipient.permissions and target not in self.held
+        if (under(ref, self.restricted) and recipient and not under(ref, recipient.permissions) and target not in self.held
                 and target not in self.released):
             self.held[target] = Containment(agent_id=target, role=recipient.role, scope="egress", trigger="need_to_know",
                                             paused_at_sequence=e.sequence,
@@ -301,6 +354,7 @@ class LiveGuard:
             "quarantined_inputs": len(self.quarantined),
             "policy_responses": len(self.responses),
             "stopped_before_first_harm": sum(1 for c in self.paused.values() if c.trigger == "hijack_tripwire"),
+            "blocked_by_policy_check": len(self.policy_blocks),
             "blocked_actions_total": sum(c.blocked_actions for c in [*self.paused.values(), *self.held.values()]),
         }
         return LiveReport(run_id=self.run_id, mode=self.mode, pause_at=self.pause_at, events_processed=len(self.events),

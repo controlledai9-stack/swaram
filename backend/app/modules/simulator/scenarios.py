@@ -415,3 +415,9 @@ from app.modules.simulator.injections import INJECTION_ATTACKS, INJECTION_SCENAR
 SCENARIOS.extend(INJECTION_SCENARIOS)
 SCENARIO_ATTACKS.update(INJECTION_ATTACKS)
 SCENARIOS_BY_ID.update({s.scenario_id: s for s in INJECTION_SCENARIOS})
+
+from app.modules.simulator.goals import GOAL_ATTACKS, GOAL_SCENARIOS  # noqa: E402
+
+SCENARIOS.extend(GOAL_SCENARIOS)
+SCENARIO_ATTACKS.update(GOAL_ATTACKS)
+SCENARIOS_BY_ID.update({s.scenario_id: s for s in GOAL_SCENARIOS})

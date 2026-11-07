@@ -54,10 +54,10 @@ def test_runs_that_dont_fit_are_refused_up_front(monkeypatch, tmp_path):
     monkeypatch.setattr(ga, "GLOBAL_QUOTA_TRACKER", tracker)
     for _ in range(10):
         tracker.record_call()  # 10 left
-    small = ScenarioConfig(scenario_id="normal_collaboration", agent_count=3, agent_backend="gemini", agent_mode="autonomous")
-    quota.check_run(small)  # 8 calls: fits
-    big = ScenarioConfig(scenario_id="normal_collaboration", agent_count=5, agent_backend="gemini", agent_mode="autonomous")
-    with pytest.raises(ValueError, match=r"needs about 16 model calls and 10 are left"):
+    small = ScenarioConfig(scenario_id="normal_collaboration", agent_count=5, agent_backend="gemini", agent_mode="autonomous")
+    quota.check_run(small)  # 10 calls: fits
+    big = ScenarioConfig(scenario_id="normal_collaboration", agent_count=10, agent_backend="gemini", agent_mode="autonomous")
+    with pytest.raises(ValueError, match=r"needs about 20 model calls and 10 are left"):
         quota.check_run(big)
     quota.check_run(big.model_copy(update={"agent_backend": "deterministic"}))  # never limited
 
@@ -76,7 +76,7 @@ def test_api_refuses_an_over_quota_run_and_reports_quota(monkeypatch, tmp_path):
     try:
         c = TestClient(app)
         q = c.get("/api/gemini/quota").json()
-        assert q["exhausted"] and q["remaining_today"] == 0 and q["calls_per_run"]["5"] == {"scripted": 20, "autonomous": 16}
+        assert q["exhausted"] and q["remaining_today"] == 0 and q["calls_per_run"]["5"] == {"scripted": 20, "autonomous": 10}
         r = c.post("/api/simulate", json={"scenario_id": "normal_collaboration", "agent_backend": "gemini", "persist": False})
         assert r.status_code == 400 and "Not enough Gemini quota" in r.json()["detail"]
         ok = c.post("/api/simulate", json={"scenario_id": "normal_collaboration", "persist": False})

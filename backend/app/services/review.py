@@ -35,7 +35,7 @@ def record(store, run_id: str, kind: str, data: dict) -> dict:
             "trigger": data.get("trigger"), "explanation": data.get("explanation") or data.get("reason"),
             "resource": data.get("resource"), "claimed_sender": data.get("claimed_sender"),
             "risk": data.get("risk"), "status": "pending", "created_at": now_iso(), "decided_at": None, "note": None,
-            "effect": None}
+            "effect": None, "decided_by": None, "escalated_at": None}
     store.put("reviews", rid, item)
     get_hub().publish("review", {"action": "created", "item": item}, run_id)
     return item
@@ -54,7 +54,7 @@ def items(store, status: str | None = None, run_id: str | None = None) -> list[d
     return sorted((d for d in docs if status in (None, d.get("status"))), key=lambda d: d["created_at"], reverse=True)
 
 
-def decide(store, rid: str, decision: str, note: str | None = None) -> dict:
+def decide(store, rid: str, decision: str, note: str | None = None, by: str | None = None) -> dict:
     if decision not in ("release", "confirm"):
         raise ValueError("decision must be 'release' or 'confirm'")
     item = store.get("reviews", rid)
@@ -71,7 +71,43 @@ def decide(store, rid: str, decision: str, note: str | None = None) -> dict:
         effect = "recorded; the run has already finished, so nothing was running to release"
     else:
         effect = guard.release(item["agent_id"], egress_only=item["kind"] == "held_egress")
-    item.update(status="released" if decision == "release" else "confirmed", decided_at=now_iso(), note=note, effect=effect)
+    item.update(status="released" if decision == "release" else "confirmed", decided_at=now_iso(), note=note, effect=effect,
+                decided_by=(by or "").strip()[:80] or "unknown")
     store.put("reviews", rid, item)
     get_hub().publish("review", {"action": "decided", "item": item}, item["run_id"])
     return item
+
+
+def escalate(store, after_minutes: float = 15.0, now: str | None = None) -> list[dict]:
+    """Pending items nobody has handled for `after_minutes` are marked overdue and announced again (once each)."""
+    from app.timeutil import parse_iso
+
+    now_t = parse_iso(now or now_iso())
+    due = []
+    for item in items(store, "pending"):
+        age = (now_t - parse_iso(item["created_at"])).total_seconds() / 60
+        if age >= after_minutes and not item.get("escalated_at"):
+            item["escalated_at"] = now or now_iso()
+            store.put("reviews", item["review_id"], item)
+            get_hub().publish("review", {"action": "escalated", "item": item, "waiting_minutes": round(age, 1)}, item["run_id"])
+            due.append(item)
+    return due
+
+
+def start_escalation_loop(store_factory, every_s: float = 60.0) -> None:
+    """Background check (app startup): escalate overdue reviews every minute. SWARMGUARD_REVIEW_ESCALATE_MIN (15)."""
+    import os
+    import threading
+    import time
+
+    minutes = float(os.getenv("SWARMGUARD_REVIEW_ESCALATE_MIN", "15"))
+
+    def loop() -> None:
+        while True:
+            time.sleep(every_s)
+            try:
+                escalate(store_factory(), minutes)
+            except Exception:  # never let the checker die
+                pass
+
+    threading.Thread(target=loop, name="swarmguard-review-escalation", daemon=True).start()

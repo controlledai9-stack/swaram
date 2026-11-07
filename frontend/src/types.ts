@@ -28,6 +28,7 @@ export interface ScenarioConfig {
   sensors?: boolean;
   agent_backend: string;
   agent_mode?: "scripted" | "autonomous";
+  rounds?: number;
   auto_pipeline: boolean;
   live_guard?: "off" | "detect" | "contain";
   pause_at?: number;
@@ -304,6 +305,8 @@ export interface ReviewItem {
   decided_at: string | null;
   note: string | null;
   effect: string | null;
+  decided_by?: string | null;
+  escalated_at?: string | null;
 }
 
 export interface GeminiQuotaStatus {

@@ -1,5 +1,6 @@
 /** Client for the live stream (WebSocket /api/live). See docs/live-stream.md for every message type. */
 import { useEffect, useRef, useState } from "react";
+import { getApiKey } from "./apiKey";
 
 export type LiveType = "hello" | "run_started" | "run_agents" | "event" | "detection" | "containment" | "quarantine" | "response" | "operator"
   | "run_finished" | "run_failed" | "quota" | "review";
@@ -17,6 +18,8 @@ export function liveUrl(runId?: string | null, since = 0): string {
   const q = new URLSearchParams();
   if (runId) q.set("run_id", runId);
   if (since) q.set("since", String(since));
+  const key = getApiKey();
+  if (key) q.set("key", key); // browsers can't send headers on a WebSocket
   return `${proto}://${location.host}/api/live${q.toString() ? `?${q}` : ""}`;
 }
 

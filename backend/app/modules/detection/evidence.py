@@ -13,7 +13,21 @@ from app.schemas import NormalizedEvent
 from app.timeutil import parse_iso
 
 
+_COVERAGE_CACHE: dict[tuple, "LogCoverage"] = {}
+
+
 class LogCoverage:
+    @classmethod
+    def of(cls, events: list[NormalizedEvent]) -> "LogCoverage":
+        """Shared coverage for one event list: every rule in a detection pass gets the same list object."""
+        key = (id(events), len(events), events[0].event_id if events else None, events[-1].event_id if events else None)
+        hit = _COVERAGE_CACHE.get(key)
+        if hit is None:
+            if len(_COVERAGE_CACHE) > 8:
+                _COVERAGE_CACHE.clear()
+            hit = _COVERAGE_CACHE[key] = cls(events)
+        return hit
+
     def __init__(self, events: list[NormalizedEvent]):
         ordered = sorted((e for e in events if e.sequence > 0), key=lambda e: e.sequence)
         self.seqs = [e.sequence for e in ordered]
@@ -124,7 +138,9 @@ def sensor_match(o: NormalizedEvent, index: dict, tol: float = 30.0) -> Normaliz
     """The agent-log record of the action a sensor saw, if the agent log has it."""
     mid = o.payload.get("message_id")
     for x in index.get((o.agent_id, o.payload.get("mirrors")), []):
-        if (x.action == o.action and x.resource == o.resource and x.target == o.target and _secs_apart(x, o) <= tol
+        # A sensor that can't see a field (e.g. a proxy doesn't know which file was uploaded) matches on the rest.
+        if (x.action == o.action and o.resource in (None, x.resource) and o.target in (None, x.target)
+                and _secs_apart(x, o) <= tol
                 and (not mid or x.payload.get("message_id") == mid)):
             return x
     return None

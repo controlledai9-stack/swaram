@@ -28,6 +28,12 @@ ROLE_OUTPUT = {
 }
 
 RESTRICTED_RESOURCES = ["data/customer_pii", "secrets/api_keys"]
+
+
+def under(resource: str | None, roots) -> bool:
+    """True if `resource` is one of `roots` or inside one (data/customer_pii/customers.csv is under data/customer_pii).
+    Real agents name files, not just the folders our policy lists, so every restricted / permitted check uses this."""
+    return bool(resource) and any(resource == r or resource.startswith(r.rstrip("/") + "/") for r in roots if r)
 EXTERNAL_PREFIX = "external:"
 EXTERNAL_ALLOWLIST = ["external:approved-partner-api"]
 TOPICS = ["SG-101", "SG-102", "SG-103", "SG-104", "SG-105", "SG-106"]

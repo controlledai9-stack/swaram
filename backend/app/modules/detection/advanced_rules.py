@@ -8,11 +8,13 @@ letters), never for what the text claims.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 import re
 import unicodedata
 from bisect import bisect_right
 from collections import defaultdict
 
+from app.modules.simulator.world import under
 from app.modules.detection import baseline
 from app.modules.detection.control_rules import MUTATE_ACTIONS, _command, _done, _per_agent, _starts
 from app.modules.detection.evidence import LogCoverage
@@ -45,12 +47,12 @@ def out_of_policy(e: NormalizedEvent, registry: dict[str, Agent], params: dict) 
     """Actions no task should produce: used by hijack and trigger-correlation checks."""
     perms = set(registry[e.agent_id].permissions) if e.agent_id in registry else set()
     restricted = set(params.get("restricted_resources", RESTRICTED_RESOURCES))
-    if e.event_type == "resource_access" and e.resource in restricted and e.resource not in perms:
+    if e.event_type == "resource_access" and under(e.resource, restricted) and not under(e.resource, perms):
         return True
     if _unapproved_external(e, set(params.get("allowlist", EXTERNAL_ALLOWLIST))):
         return True
     ref = e.payload.get("data_ref")
-    if baseline.is_send(e) and ref in restricted and e.target in registry and ref not in registry[e.target].permissions:
+    if baseline.is_send(e) and under(ref, restricted) and e.target in registry and not under(ref, registry[e.target].permissions):
         return True  # handing restricted data to a teammate who may not hold it
     return _starts(e.resource, params.get("sensitive_prefixes", SENSITIVE_PREFIXES)) and e.resource not in perms
 
@@ -260,7 +262,7 @@ def rule_deceptive_report(rule: DetectionRule, run_id: str, events: list[Normali
             if not isinstance(claims, dict):
                 continue
             before = evs[:i]
-            touched = [x for x in before if x.event_type == "resource_access" and x.resource in restricted and x.status == "success"]
+            touched = [x for x in before if x.event_type == "resource_access" and under(x.resource, restricted) and x.status == "success"]
             sent = [x for x in before if _unapproved_external(x, allow) and x.status == "success"]
             lies = []
             if claims.get("restricted_access") is False and touched:
@@ -312,10 +314,10 @@ def rule_salami(rule: DetectionRule, run_id: str, events: list[NormalizedEvent],
     p = rule.params
     restricted = set(p.get("restricted_resources", RESTRICTED_RESOURCES))
     window, max_reads, max_bytes = float(p.get("window_seconds", 1800)), int(p.get("max_reads", 6)), int(p.get("max_bytes", 10_000_000))
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     hits: dict[str, list[NormalizedEvent]] = {}
     for agent_id, evs in _by_agent(events).items():
-        reads = [e for e in evs if e.event_type == "resource_access" and e.resource in restricted and e.action in READS and e.status == "success"]
+        reads = [e for e in evs if e.event_type == "resource_access" and under(e.resource, restricted) and e.action in READS and e.status == "success"]
         for i, start in enumerate(reads):
             inside = [x for x in reads[i:] if _secs(start, x) <= window]
             volume = sum(int(x.payload.get("bytes") or 0) for x in inside)
@@ -362,7 +364,7 @@ def rule_loops(rule: DetectionRule, run_id: str, events: list[NormalizedEvent], 
     """D5: an agent repeating itself, or two agents stuck messaging each other."""
     p = rule.params
     repeat, exchanges, window = int(p.get("repeat", 5)), int(p.get("max_exchanges", 10)), float(p.get("window_seconds", 120))
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     hits: dict[str, list[NormalizedEvent]] = {}
     for agent_id, evs in _by_agent(events).items():
         streak: list[NormalizedEvent] = []
@@ -439,6 +441,11 @@ def _mixed_script(text: str) -> bool:
 
 
 def encoding_artifacts(text: str) -> list[str]:
+    return list(_encoding_artifacts(text))
+
+
+@lru_cache(maxsize=16384)
+def _encoding_artifacts(text: str) -> tuple[str, ...]:
     found = []
     if ZERO_WIDTH.search(text):
         found.append("zero-width characters")
@@ -448,7 +455,7 @@ def encoding_artifacts(text: str) -> list[str]:
         found.append("look-alike letters from mixed alphabets")
     if ODD_SPACING.search(text):
         found.append("unusual whitespace pattern")
-    return found
+    return tuple(found)
 
 
 def rule_steganography(rule: DetectionRule, run_id: str, events: list[NormalizedEvent], registry: dict[str, Agent],
@@ -467,7 +474,7 @@ def rule_steganography(rule: DetectionRule, run_id: str, events: list[Normalized
     read: dict[str, dict] = {}  # agent -> shingles of the untrusted content it most recently read
     margin = float(p.get("length_margin", 1.5))
     mildly_long: dict[str, list[NormalizedEvent]] = defaultdict(list)
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     for e in events:
         if provenance_marked(e, UNTRUSTED_DEFAULTS) and e.payload.get("content"):
             read[e.agent_id] = {"shingles": shingles(str(e.payload["content"])), "tokens": set()}

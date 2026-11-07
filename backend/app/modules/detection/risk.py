@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from app.modules.simulator.world import under
 from app.modules.detection import baseline
 from app.schemas import Agent, AgentAssessment, Alert, AuditItem, DetectionRule, Hypothesis, NormalizedEvent, RareBehavior
 
@@ -128,6 +129,15 @@ def assess(run_id: str, events: list[NormalizedEvent], agents: list[Agent], aler
         for aid in al.agent_ids:
             agent_alerts[aid].append(al)
 
+    # One pass over the events for the per-agent facts below (was one full scan per agent).
+    perms = {a.agent_id: set(a.permissions) for a in agents}
+    restricted_reads = {e.agent_id for e in events
+                        if e.event_type == "resource_access" and under(e.resource, restricted) and e.status == "success"
+                        and e.resource in perms.get(e.agent_id, ())}
+    by_agent: dict[str, list[NormalizedEvent]] = defaultdict(list)
+    for e in events:
+        if isinstance(e.payload.get("ai_trace"), dict):
+            by_agent[e.agent_id].append(e)
     out = []
     for a in agents:
         bits, rare = baseline.score_agent(profile, a.role, behaviors.get(a.agent_id, {}))
@@ -149,7 +159,7 @@ def assess(run_id: str, events: list[NormalizedEvent], agents: list[Agent], aler
             lr = anomaly_lr(bits)
             odds *= lr
             evidence.append(f"Behavioral anomaly {bits} bits: x{lr:.1f}")
-        exposed_silent, refused = ai_trace_signals(events, a.agent_id)
+        exposed_silent, refused = ai_trace_signals(by_agent.get(a.agent_id, []), a.agent_id)
         if exposed_silent:
             odds *= SILENT_EXPOSURE_LR
             evidence.append(f"Read untrusted content and raised no concern (self-reported trace): x{SILENT_EXPOSURE_LR:g}")
@@ -189,9 +199,7 @@ def assess(run_id: str, events: list[NormalizedEvent], agents: list[Agent], aler
             "sabotage": "SG-023" in fired,
             "drift": "SG-025" in fired,
             "exposed_silent": exposed_silent,
-            "permitted_restricted_read": any(
-                e.agent_id == a.agent_id and e.event_type == "resource_access" and e.resource in restricted
-                and e.resource in a.permissions and e.status == "success" for e in events),
+            "permitted_restricted_read": a.agent_id in restricted_reads,
         }
         lvl = level(risk, bits, watch_bits, flagged=bool(own))
         hyps = _hypotheses(facts) if lvl != "low" else []
@@ -216,7 +224,7 @@ def audit_queue(events: list[NormalizedEvent], agents: list[Agent], alerts: list
     from app.modules.detection.advanced_rules import SENSITIVE_PREFIXES
     from app.modules.detection.evidence import LogCoverage
 
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     restricted = set(next((r.params.get("restricted_resources", []) for r in rules if r.rule_id == "SG-001"), []))
     anomaly_rule = next((r for r in rules if r.rule_id == "SG-004"), None)
     profile = (anomaly_rule.params.get("profile") if anomaly_rule else None) or baseline.empty_profile()
@@ -239,7 +247,7 @@ def audit_queue(events: list[NormalizedEvent], agents: list[Agent], alerts: list
         if e.event_id in cited:
             reasons.append(f"cited by {', '.join(sorted(set(cited[e.event_id])))}")
             prio += 0.35
-        sensitive = (e.resource in restricted or any((e.resource or "").startswith(x) for x in SENSITIVE_PREFIXES)
+        sensitive = (under(e.resource, restricted) or any((e.resource or "").startswith(x) for x in SENSITIVE_PREFIXES)
                      or (e.event_type == "data_transfer" and (e.target or "").startswith("external:")))
         gap = coverage.missing_around(e, 30.0) if sensitive else 0
         if gap >= 2:

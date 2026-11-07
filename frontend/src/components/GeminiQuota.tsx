@@ -9,12 +9,13 @@ function inHours(seconds: number): string {
 }
 
 /** Today's Gemini usage and whether the next run fits. Shown wherever a Gemini-backed run can be started. */
-export function GeminiQuota({ agentCount, agentMode = "scripted", refreshKey = 0, onChange }: {
-  agentCount: number; agentMode?: "scripted" | "autonomous"; refreshKey?: number; onChange?: (enough: boolean) => void;
+export function GeminiQuota({ agentCount, agentMode = "scripted", rounds = 2, refreshKey = 0, onChange }: {
+  agentCount: number; agentMode?: "scripted" | "autonomous"; rounds?: number; refreshKey?: number; onChange?: (enough: boolean) => void;
 }) {
   const q = useRunData(() => api.geminiQuota(), "gemini-quota", [refreshKey]);
   const d = q.data;
-  const need = d?.calls_per_run[String(agentCount)]?.[agentMode] ?? 0;
+  // calls_per_run is for the default 2 rounds; calls grow linearly with rounds.
+  const need = Math.ceil(((d?.calls_per_run[String(agentCount)]?.[agentMode] ?? 0) * rounds) / 2);
   const enough = !!d && d.configured && need <= d.remaining_today;
   useEffect(() => { if (d) onChange?.(enough); }, [d, enough, onChange]);
 

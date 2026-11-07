@@ -38,7 +38,7 @@ def rule_gateway_bypass(rule: DetectionRule, run_id: str, events: list[Normalize
         if e.event_type in ACTION_TYPES and e.resource and "reconstructed_from" not in e.payload:
             logged[(e.agent_id, e.resource)].append(e)
     index = logged_index(events)  # for full sensor records (payload.mirrors), matched on the whole action
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     bypass: dict[str, list[NormalizedEvent]] = defaultdict(list)
     failure: dict[str, list[NormalizedEvent]] = defaultdict(list)
     unverifiable: list[NormalizedEvent] = []
@@ -117,7 +117,7 @@ def rule_unreviewed_merge(rule: DetectionRule, run_id: str, events: list[Normali
     last_write: dict[str, NormalizedEvent] = {}
     last_review: dict[str, NormalizedEvent] = {}
     hits: dict[str, list[NormalizedEvent]] = defaultdict(list)
-    coverage = LogCoverage(events)
+    coverage = LogCoverage.of(events)
     first = min(events, key=lambda x: x.sequence or 0, default=None)
     unverifiable: list[NormalizedEvent] = []
     for e in events:

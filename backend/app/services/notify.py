@@ -34,6 +34,10 @@ def summary(msg: dict) -> str | None:
     if t == "review" and d.get("action") == "created":
         item = d.get("item") or {}
         return f"SwarmGuard: review needed for {item.get('agent_id')} ({item.get('kind')}) in {run}"
+    if t == "review" and d.get("action") == "escalated":
+        item = d.get("item") or {}
+        return (f"SwarmGuard: OVERDUE review for {item.get('agent_id')} ({item.get('kind')}) in {run}: "
+                f"waiting {d.get('waiting_minutes')} min")
     return None
 
 

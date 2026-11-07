@@ -131,7 +131,52 @@ def from_langsmith(runs: list[dict], run_id: str) -> tuple[list[dict], list[dict
     return events, list(agents.values())
 
 
-FORMATS = {"otel": from_otel, "langsmith": from_langsmith}
+# ---------------------------------------------------------------- real sensor feeds (a second evidence source)
+# Records from systems the agents don't control. They become `observation` events with payload.mirrors, which
+# detection fuses with the agent log (evidence.fuse) and reconciles in SG-021: an action a sensor saw but the agent
+# log never recorded, with no log gap to explain it, is a gateway bypass.
+
+def _sensor(run_id: str, kind: str, i: int, rec: dict, *, agent: str, mirrors: str, action: str, resource=None,
+            target=None, extra: dict | None = None) -> dict:
+    import hashlib
+    import json as _json
+
+    h = hashlib.sha1(_json.dumps(rec, sort_keys=True, default=str).encode()).hexdigest()[:8]
+    return {"run_id": run_id, "event_id": f"sensor-{kind}-{i:05d}-{h}", "agent_id": agent,
+            "timestamp": rec.get("timestamp") or rec.get("ts") or rec.get("time"), "event_type": "observation",
+            "action": action, "status": "success", "resource": resource, "target": target, "sequence": 0,
+            "payload": {"source": kind, "mirrors": mirrors, **(extra or {})}}
+
+
+def from_egress(records: list[dict], run_id: str) -> tuple[list[dict], list[dict]]:
+    """Egress proxy log: {timestamp, agent_id|client, destination|host, method?, resource?, bytes?}."""
+    out = []
+    for i, r in enumerate(records):
+        dest = str(r.get("destination") or r.get("host") or "")
+        dest = dest if dest.startswith("external:") else f"external:{dest}"
+        action = "download" if str(r.get("method", "POST")).upper() == "GET" else "upload"
+        out.append(_sensor(run_id, "egress-proxy", i, r, agent=r.get("agent_id") or r.get("client"), mirrors="data_transfer",
+                           action=action, resource=r.get("resource"), target=dest, extra={"bytes": r.get("bytes")}))
+    return out, []
+
+
+def from_file_audit(records: list[dict], run_id: str) -> tuple[list[dict], list[dict]]:
+    """File / DB audit log: {timestamp, agent_id|actor, path|table, operation}."""
+    return [_sensor(run_id, "resource-audit", i, r, agent=r.get("agent_id") or r.get("actor"), mirrors="resource_access",
+                    action=str(r.get("operation") or "read").lower(), resource=r.get("path") or r.get("table"))
+            for i, r in enumerate(records)], []
+
+
+def from_broker(records: list[dict], run_id: str) -> tuple[list[dict], list[dict]]:
+    """Message broker log: {timestamp, sender, recipient, message_id, data_ref?, content?}."""
+    return [_sensor(run_id, "broker-log", i, r, agent=r.get("sender"), mirrors="message", action="send",
+                    target=r.get("recipient"),
+                    extra={k: r[k] for k in ("message_id", "data_ref", "content") if r.get(k) is not None})
+            for i, r in enumerate(records)], []
+
+
+FORMATS = {"otel": from_otel, "langsmith": from_langsmith, "egress": from_egress, "file_audit": from_file_audit,
+           "broker": from_broker}
 
 
 def convert(fmt: str, doc: Any, run_id: str) -> tuple[list[dict], list[dict]]:

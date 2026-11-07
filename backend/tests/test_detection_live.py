@@ -34,7 +34,10 @@ def test_unauthorized_agent_is_paused_mid_attack(pipe):
     assert m["attack_actions_blocked_by_pause"] >= 1 and m["paused_innocent"] == 0
     blocked = [e for e in res.events if e.payload.get("quarantined")]
     assert blocked and all(e.agent_id == attacker and e.status == "denied" and e.gateway_decision == "blocked" for e in blocked)
-    assert all(e.sequence > c.paused_at_sequence for e in blocked)  # only actions after the pause are denied
+    # The first out-of-policy read is refused before it runs (pre-execution check); after that the agent is paused.
+    first = min(blocked, key=lambda e: e.sequence)
+    assert "pre-execution check" in first.payload["gateway_reason"] and first.sequence <= c.paused_at_sequence
+    assert all(e.sequence > c.paused_at_sequence or "pre-execution check" in e.payload["gateway_reason"] for e in blocked)
 
 
 @pytest.mark.parametrize("agents", [5, 10])
@@ -42,12 +45,15 @@ def test_leak_is_stopped_before_data_leaves(pipe, agents):
     res = live(pipe, "coordinated_leakage", agents=agents)
     m = res.live_report.metrics
     assert m["data_left_the_system"] is False  # even with the static gateway only monitoring
-    assert m["paused_malicious"] == m["malicious_agents"] and m["paused_innocent"] == 0
-    holds = [c for c in res.live_report.containment if c.scope == "egress"]
-    coder = next(a.agent_id for a in res.agents if a.role == "coder")
-    assert coder in {c.agent_id for c in holds}
+    contained = {c.agent_id for c in res.live_report.containment}
+    assert set(res.run.labels.malicious_agent_ids) <= contained and m["paused_innocent"] == 0
+    assert contained <= set(res.run.labels.malicious_agent_ids)  # nobody innocent is held either
+    # The hand-off itself is refused before it runs, and so is the upload: nothing moves at all.
+    handoff = next(e for e in res.events if e.event_type == "message" and e.payload.get("data_ref") == "data/customer_pii")
     upload = next(e for e in res.events if e.event_type == "data_transfer" and e.target == "external:paste-site")
-    assert upload.status == "denied" and upload.payload["quarantined"] and "egress held" in upload.payload["gateway_reason"]
+    for e in (handoff, upload):
+        assert e.status == "denied" and e.payload["quarantined"] and "pre-execution check" in e.payload["gateway_reason"]
+    assert m["blocked_by_policy_check"] >= 2
 
 
 def test_detect_mode_observes_without_blocking(pipe):

@@ -10,9 +10,18 @@ acts, and in `contain` mode its next actions are denied before they execute. `fi
     POST /api/ingest/{run_id}/gate            {"agent_id", "event_type", "action", "target", "resource", "payload"}
     POST /api/ingest/{run_id}/events          [raw event, ...]   (event_id / sequence / timestamp optional)
     POST /api/ingest/{run_id}/finish
+
+Agent identity: every agent in a session gets its own token (HMAC-SHA256 of run and agent id under a server secret).
+With `"require_agent_identity": true`, an event, gate call or proxied request for an agent must carry that agent's
+token, so one agent (or a compromised process holding the platform's key) can't report or act as another.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import os
+import secrets
 import threading
 import uuid
 from typing import Any
@@ -23,36 +32,54 @@ from app.services.live_hub import LiveStream, get_hub
 from app.timeutil import now_iso
 
 SESSIONS: dict[str, "IngestSession"] = {}
+_SECRET = (os.getenv("SWARMGUARD_IDENTITY_SECRET") or "").encode() or secrets.token_bytes(32)
+
+
+def agent_token(run_id: str, agent_id: str) -> str:
+    mac = hmac.new(_SECRET, f"{run_id}/{agent_id}".encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
 
 
 class IngestSession:
-    def __init__(self, run_id: str, agents: list[Agent], guard: LiveGuard | None, on_contained=None):
+    def __init__(self, run_id: str, agents: list[Agent], guard: LiveGuard | None, on_contained=None,
+                 require_identity: bool = False):
         self.run_id, self.agents, self.guard = run_id, agents, guard
+        self.require_identity = require_identity
         self.stream = LiveStream(get_hub(), guard, on_contained)
         self.lock = threading.Lock()
         self.seq = 0
         self.stream.start(run_id, agents)
 
+    def verify(self, agent_id: str | None, token: str | None) -> bool:
+        """True if identity isn't required, or `token` is this agent's own token."""
+        if not self.require_identity:
+            return True
+        return bool(agent_id and token) and hmac.compare_digest(agent_token(self.run_id, agent_id), token)
+
     def gate(self, req: dict) -> dict:
         with self.lock:
             reason = self.stream.gate(req["agent_id"], req.get("event_type"), req.get("target"), action=req.get("action"),
                                       resource=req.get("resource"), payload=req.get("payload") or {},
-                                      sequence=self.seq + 1, timestamp=now_iso())
+                                      sequence=self.seq + 1, timestamp=now_iso(),
+                                      policy_check=req.get("policy_check", True))
         return {"allow": reason is None, "reason": reason}
 
     def add(self, raw: dict) -> RawEvent:
         with self.lock:
-            self.seq += 1
+            sensor = raw.get("event_type") == "observation"  # a separate source: it has no place in the agent log's order
+            self.seq += 0 if sensor else 1
             ev = RawEvent.model_validate({
-                "event_id": raw.get("event_id") or f"evt-{self.run_id.removeprefix('run-')}-{self.seq:05d}",
+                "event_id": raw.get("event_id") or f"evt-{self.run_id.removeprefix('run-')}-{self.seq:05d}{'-s' if sensor else ''}",
                 "timestamp": raw.get("timestamp") or now_iso(), "status": raw.get("status") or "success",
-                **{k: v for k, v in raw.items() if k not in ("event_id", "timestamp", "status", "run_id", "sequence")},
-                "run_id": self.run_id, "sequence": self.seq})
+                **{k: v for k, v in raw.items()
+                   if k not in ("event_id", "timestamp", "status", "run_id", "sequence", "agent_token")},
+                "run_id": self.run_id, "sequence": 0 if sensor else self.seq})
             self.stream.observe(ev)
         return ev
 
 
-def open_session(pipeline, name: str, agents: list[dict], live_guard: str = "contain", pause_at: float = 0.6) -> dict:
+def open_session(pipeline, name: str, agents: list[dict], live_guard: str = "contain", pause_at: float = 0.6,
+                 require_identity: bool = False) -> dict:
     if not agents:
         raise ValueError("a session needs at least one agent (agent_id, role, permissions)")
     run_id = f"run-{uuid.uuid4().hex[:8]}"
@@ -70,8 +97,9 @@ def open_session(pipeline, name: str, agents: list[dict], live_guard: str = "con
                                                  "live_guard": live_guard, "agent_count": len(regs)}}, run_id)
     from app.services import review
 
-    SESSIONS[run_id] = IngestSession(run_id, regs, guard, review.recorder(pipeline.store, run_id))
-    return {"run_id": run_id, "stream": f"/api/live?run_id={run_id}"}
+    SESSIONS[run_id] = IngestSession(run_id, regs, guard, review.recorder(pipeline.store, run_id), require_identity)
+    return {"run_id": run_id, "stream": f"/api/live?run_id={run_id}", "require_agent_identity": require_identity,
+            "agent_tokens": {a.agent_id: agent_token(run_id, a.agent_id) for a in regs}}
 
 
 def session(run_id: str) -> IngestSession:
@@ -79,6 +107,18 @@ def session(run_id: str) -> IngestSession:
     if s is None:
         raise ValueError(f"no open ingest session {run_id} (open one with POST /api/ingest/sessions)")
     return s
+
+
+def control(run_id: str) -> dict[str, Any]:
+    """What the guard has decided about each agent right now, for a platform to poll and act on (no push needed)."""
+    s = session(run_id)
+    g = s.guard
+    if g is None:
+        return {"run_id": run_id, "mode": "off", "paused": {}, "held_egress": {}, "quarantined": []}
+    def why(c):
+        return {"trigger": c.trigger, "since_event": c.paused_at_sequence, "explanation": c.explanation}
+    return {"run_id": run_id, "mode": g.mode, "paused": {a: why(c) for a, c in g.paused.items()},
+            "held_egress": {a: why(c) for a, c in g.held.items()}, "quarantined": list(g.quarantined)}
 
 
 def add_events(pipeline, run_id: str, events: list[dict]) -> dict[str, Any]:

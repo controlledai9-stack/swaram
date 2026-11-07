@@ -93,7 +93,7 @@ def test_collection_report_summarises_ai_decisions():
     sim = run_simulation(ScenarioConfig(scenario_id="inj_phishing_email", agent_mode="autonomous", persist=False),
                          adapter=FakeLLM(gullible=False))
     rep = collect([e.model_dump(mode="json") for e in sim.events], run_id=sim.run.run_id, agents=sim.agents).report
-    assert rep.ai == {"model_decisions": 8, "fallbacks": 0, "refusals": 1, "exposed_to_untrusted": 1}
+    assert rep.ai == {"model_decisions": 10, "fallbacks": 0, "refusals": 1, "exposed_to_untrusted": 1}  # 8 worker + 2 planner
 
 
 # ------------------------------------------------------------ real log formats

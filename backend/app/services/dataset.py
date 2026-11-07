@@ -53,8 +53,8 @@ class BatchConfig:
 
 
 def calls_per_run(agent_count: int) -> int:
-    """Model calls one AI-mode run makes: 2 rounds x (assignment + decision) per worker."""
-    return 4 * (agent_count - 1)
+    """Model calls one AI-mode run makes: per round, one planner call plus one decision per worker."""
+    return 2 * agent_count
 
 
 def planned_runs(cfg: BatchConfig) -> list[tuple[str, str, int]]:

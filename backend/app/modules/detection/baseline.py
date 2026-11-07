@@ -14,6 +14,7 @@ import copy
 import math
 from collections import defaultdict
 
+from app.modules.simulator.world import under
 from app.schemas import Agent, NormalizedEvent
 
 RARE_P = 0.1  # behaviors seen in >= 10% of same-role agents are "normal"
@@ -159,7 +160,7 @@ def is_sensitive(behavior: str, restricted: set[str], prefixes: list[str]) -> bo
     if behavior.startswith("data_transfer:") or "data_ref=" in behavior:
         return True
     target = behavior.split(":", 2)[-1]
-    return target in restricted or any(target.startswith(p) for p in prefixes)
+    return under(target, restricted) or any(target.startswith(p) for p in prefixes)
 
 
 def identity_drift(profile: dict, agent: Agent, behaviors: dict[str, list[str]], peers: set[str], *, restricted: set[str],
@@ -180,6 +181,8 @@ def identity_drift(profile: dict, agent: Agent, behaviors: dict[str, list[str]],
             continue
         if b.startswith("message:"):
             continue  # message volume scales with swarm size; runaway messaging is SG-018's job
+        if not is_sensitive(b, restricted, prefixes):
+            continue  # more wiki reads than usual is not a threat (seen with real AI agents); more PII reads is
         mean = h["sum"] / runs
         std = max(0.0, h["sumsq"] / runs - mean * mean) ** 0.5
         if len(ids) >= 3 and len(ids) > mean + sigmas * max(std, 1.0):

@@ -10,19 +10,23 @@ from app.schemas import ScenarioConfig
 AGENT_COUNTS = (3, 5, 10, 20)
 
 
-def estimate_calls(agent_count: int, agent_mode: str = "scripted", user_task: bool = False) -> int:
-    """Model calls one run makes with a model backend (measured: AI mode 16 calls with 5 agents)."""
+def estimate_calls(agent_count: int, agent_mode: str = "scripted", user_task: bool = False, rounds: int = 2) -> int:
+    """Model calls one run makes with a model backend (AI mode, 5 agents, 2 rounds: 10 calls)."""
     workers = max(1, agent_count - 1)
     if user_task:
         return 40  # the user-task team iterates; this is a generous upper bound
     if agent_mode == "autonomous":
-        return 4 * workers  # 2 rounds x (assignment + decision) per worker
-    return 5 * workers  # scripted rounds: assignments, reports and some peer notes are model-written
+        return rounds * (workers + 1)  # per round: one planner call + one decision per worker
+    return -(-5 * workers * rounds // 2)  # scripted: assignments, reports and some peer notes are model-written
 
 
 def estimate_for(config: ScenarioConfig) -> int:
+    from app.modules.simulator.world import SCENARIOS_BY_ID
+
+    scenario = SCENARIOS_BY_ID.get(config.scenario_id)
+    rounds = max(config.rounds, scenario.min_rounds if scenario else 2)
     return estimate_calls(config.agent_count, config.agent_mode,
-                          bool(config.user_task or config.scenario_id == "user_directed"))
+                          bool(config.user_task or config.scenario_id == "user_directed"), rounds)
 
 
 def quota_status() -> dict:

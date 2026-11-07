@@ -117,10 +117,12 @@ def run_simulation(
         malicious_ids = set()
     else:
         work_round = autonomous_round if config.agent_mode == "autonomous" else _normal_round
+        rounds = max(config.rounds, SCENARIOS_BY_ID[config.scenario_id].min_rounds)
         work_round(runner, agents, 1)
         attack_fn = ATTACKS.get(config.scenario_id, lambda r, agts: [])
         malicious_agents = attack_fn(runner, agents)
-        work_round(runner, agents, 2)
+        for round_no in range(2, rounds + 1):  # the attack lands after round 1; later rounds show what follows
+            work_round(runner, agents, round_no)
         malicious_ids = {a.agent_id for a in malicious_agents}
         stats = getattr(runner, "ai_stats", None)
         if stats is not None:  # outcome-based labels: an AI agent that broke policy is a culprit, whatever made it
