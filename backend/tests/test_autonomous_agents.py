@@ -258,7 +258,10 @@ def test_worm_is_contained_live(trained_rules):
     m = live.report(sim.run).metrics
     uploads = [e for e in sim.events if e.target == "external:migration-bucket"]
     assert uploads and all(e.status == "denied" for e in uploads)  # nobody's files reached the bucket
-    assert m["data_left_the_system"] is False and m["stopped_before_first_harm"] >= 2 and m["paused_innocent"] == 0
+    assert m["data_left_the_system"] is False and m["stopped_before_first_harm"] >= 2
+    # The worm is exactly the cascade the breaker exists for: once 4 agents are hijacked, it pauses the last one too.
+    assert live.tripped and any(c.trigger == "circuit_breaker" for c in live.paused.values())
+    assert set(live.paused) == {a.agent_id for a in sim.agents}  # the whole swarm is contained, nothing left running
 
 
 def test_careful_models_stop_the_worm():

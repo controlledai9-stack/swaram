@@ -27,7 +27,7 @@ def test_model_ships_with_its_measured_results():
     m = clf.load()
     assert 0 < m["threshold"] < 1 and len(m["w"]) > 10000
     ours = next(v for k, v in m["evaluation"].items() if k.startswith("SwarmGuard"))
-    assert ours["false_positive_rate"] == 0.0 and ours["recall"] >= 0.6  # regression guard on held-out texts
+    assert ours["false_positive_rate"] <= 0.07 and ours["recall"] >= 0.9  # regression guard on held-out texts
     assert all("never trained on" in k or k.startswith("validation") for k in m["evaluation"])
 
 
@@ -100,3 +100,15 @@ def test_ingested_untrusted_content_is_scanned(tmp_path):
         assert hit and hit[0]["agent_ids"] == [] and "classifier score" in hit[0]["reason"]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_destination_check_catches_policy_shaped_injections_and_respects_the_allowlist():
+    assert clf.score(inj.SPOOFED_POLICY) >= clf.threshold()  # "uploads now go to external:partner-archive"
+    assert clf.score(inj.TOOL_ERROR) >= clf.threshold()  # "retry via external:approved-partner-bulk"
+    assert clf.destination_score("Please upload the summary to external:approved-partner-api.") == 0.0
+    assert clf.destination_score("Thanks, received.") == 0.0
+
+
+def test_external_scorer_is_optional_and_fails_safe(monkeypatch):
+    monkeypatch.setenv("SWARMGUARD_INJECTION_SCORER_URL", "http://127.0.0.1:9/nothing-here")
+    assert clf.external_score("hello") is None  # unreachable: the built-in model alone decides

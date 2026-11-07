@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useAppState, useRunData } from "../state";
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
@@ -6,6 +7,7 @@ import { Pill } from "../components/Pill";
 import { Stepper } from "../components/Stepper";
 import { Footnotes } from "../components/Footnotes";
 import { Card, Empty } from "../components/ui";
+import { GraphView } from "../components/GraphView";
 import { download } from "../lib/export";
 import { deriveIncidentTitle, getAgentRole } from "../lib/incidentHelper";
 import { ArrowRight, Sparkles, ShieldCheck, ShieldAlert, Clock } from "lucide-react";
@@ -22,6 +24,14 @@ export function OverviewPage() {
   const alerts = alertsData.data ?? [];
   const responses = responsesData.data ?? [];
   const agents = agentsData.data ?? [];
+
+  const alertEventIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of alerts) {
+      for (const eid of a.event_ids ?? []) set.add(eid);
+    }
+    return set;
+  }, [alerts]);
 
   const topAlert = alerts[0];
   const totalThreats = d?.totals.threats ?? alerts.length;
@@ -237,6 +247,32 @@ export function OverviewPage() {
           }
         />
       </div>
+
+      {/* Swarm Communication Topology (Models Graph) */}
+      <Card
+        title="Swarm communication topology"
+        actions={
+          <a
+            href="#/swarm"
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--link)] hover:underline"
+          >
+            <span>Explore full topology</span>
+            <ArrowRight size={14} />
+          </a>
+        }
+      >
+        <div className="py-2">
+          {isNoRun ? (
+            <Empty>Select a simulation run from the top bar to inspect agent communication topology.</Empty>
+          ) : isLoading ? (
+            <Empty>Loading communication topology for {selectedRunId}...</Empty>
+          ) : d?.graph ? (
+            <GraphView graph={d.graph} height={340} alertEventIds={alertEventIds} />
+          ) : (
+            <Empty>No communication topology recorded for this run.</Empty>
+          )}
+        </div>
+      </Card>
 
       {/* Two Columns: Latest Incidents & Operating Mode */}
       <div className="grid gap-6 lg:grid-cols-3">

@@ -170,8 +170,11 @@ def model_dict(w: dict[int, float], b: float, threshold: float, meta: dict) -> d
 
 
 def predict(m: dict, text: str) -> float:
+    """What SwarmGuard uses: the higher of the trained model and the destination check."""
+    from app.modules.detection.injection_classifier import destination_score
+
     z = m["bias"] + sum(m["w"].get(f, 0.0) * v for f, v in features(text).items())
-    return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z))))
+    return max(1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z)))), destination_score(text))
 
 
 def metrics(m: dict, data: list[tuple[str, int]], thr: float) -> dict:

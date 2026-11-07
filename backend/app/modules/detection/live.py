@@ -35,7 +35,7 @@ END_OF_RUN_RULES = {"SG-010"}
 
 class LiveGuard:
     def __init__(self, rules: list[DetectionRule], mode: str = "contain", pause_at: float = 0.6, policy=None,
-                 policy_gate: bool = True):
+                 policy_gate: bool = True, cascade_agents: int = 4):
         self.rules = [r for r in rules if r.rule_id not in END_OF_RUN_RULES]
         # Response policy applied live (Security Response): each new alert's decision (pause / block) is enforced on
         # the agents it names as the alert fires, not only after the run.
@@ -45,6 +45,8 @@ class LiveGuard:
         # runs, whoever the agent is and whatever its reason (injection, a goal of its own, a bug). The tripwire above
         # it still pauses agents that just read untrusted content; this one only refuses the single action.
         self.policy_gate = policy_gate
+        self.cascade_agents = cascade_agents  # auto circuit breaker: pause the rest once this many are contained (0 = off)
+        self.tripped = False
         self.policy_blocks: list[dict] = []
         self.mode = mode
         self.pause_at = pause_at
@@ -188,6 +190,23 @@ class LiveGuard:
                     self.paused[v.agent_id] = Containment(
                         agent_id=v.agent_id, role=v.role, paused_at_sequence=event.sequence, paused_at=event.timestamp,
                         risk=v.risk, explanation=v.best_explanation, trigger="risk")
+            self._circuit_breaker(event)
+
+    def _circuit_breaker(self, event: NormalizedEvent) -> None:
+        """Automatic swarm brake (OWASP ASI08): once containment spreads to enough distinct agents, pause the rest
+        too, rather than watching the cascade continue one agent at a time. Trips once; a human releases agents."""
+        if self.tripped or self.cascade_agents <= 0:
+            return
+        contained = set(self.paused) | set(self.held)
+        if len(contained) < self.cascade_agents:
+            return
+        self.tripped = True
+        for a in self.agents:
+            if a.agent_id not in self.paused and a.agent_id not in self.released:
+                self.paused[a.agent_id] = Containment(
+                    agent_id=a.agent_id, role=self.roles.get(a.agent_id), paused_at_sequence=event.sequence,
+                    paused_at=event.timestamp, risk=1.0, trigger="circuit_breaker",
+                    explanation=f"swarm circuit breaker: {len(contained)} agents already contained; pausing the rest")
 
     def replay(self, timeline: list[dict]) -> list[dict]:
         """Stream a recorded timeline through the guard as if it were happening now.
