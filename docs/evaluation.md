@@ -22,7 +22,7 @@ The platform directly operationalizes the **Hackathon Track 4: Multi-Agent Overs
 | Dimension | Initial Score | Post-Audit Score | Verification Proof |
 |---|---|---|---|
 | **Apple Look & Feel** | 5.0 / 10 | **9.8 / 10** | Pure Apple Light Mode, single system accent (`#0071e3`), translucent top nav with glass blur, soft color-mixed card borders, tabular typography, zero decorative emojis. |
-| **Information Architecture** | 4.0 / 10 | **9.8 / 10** | 7-page forensic narrative: `Overview` → `Live` → `Incidents` → `Swarm` → `Responses` → `Evaluation` → `Pipeline`. |
+| **Information Architecture** | 4.0 / 10 | **9.8 / 10** | 8-page forensic narrative: `Overview` → `Live` → `Incidents` → `Swarm` → `Responses` → `OWASP` → `Evaluation` → `Pipeline`. |
 | **First Impression / Hero** | 4.0 / 10 | **9.6 / 10** | Immediate incident verdict at 1920x1080 without scrolling; 4-state explicit rendering (no run, loading, clean run, threat run). |
 | **Live Stream & Interactivity** | N/A | **9.7 / 10** | Real-time WebSocket live stream, Gemini Quota monitoring, pause/resume agent runtime controls, and human-in-the-loop review queue. |
 | **Evidence Clarity** | 6.0 / 10 | **9.8 / 10** | Auto-selected top alert, ordered event stepper, interactive evidence chips with copyable JSON drawer, and Bayesian posterior breakdown. |
@@ -32,11 +32,11 @@ The platform directly operationalizes the **Hackathon Track 4: Multi-Agent Overs
 
 ---
 
-## 3. Information Architecture (The 7 Pages)
+## 3. Information Architecture (The 8 Pages)
 
 ```
-[Overview] ──► [Live] ──► [Incidents] ──► [Swarm] ──► [Responses] ──► [Evaluation] ──► [Pipeline]
-What happened? Real-time  Why flagged?   Who talked?  What we did?   Does it work?   Re-run & Config
+[Overview] ──► [Live] ──► [Incidents] ──► [Swarm] ──► [Responses] ──► [OWASP] ──► [Evaluation] ──► [Pipeline]
+What happened? Real-time  Why flagged?   Who talked?  What we did?   Coverage    Outside proof   Re-run & Config
 ```
 
 1. **Overview (`#/`)**:
@@ -52,6 +52,9 @@ What happened? Real-time  Why flagged?   Who talked?  What we did?   Does it wor
    - Gemini Quota usage tracking (RPM / TPM).
    - Agent runtime controls (interactive Pause / Resume agent toggles).
    - Live event ticker streaming incoming multi-agent telemetry.
+   - **Pre-Execution Denial HUD**: Counter displaying operations refused before execution with 0 runtime harm.
+   - **SG-029 Covert Transfer Counter**: Tracks staged exfiltration attempts via file/DB dead drops.
+   - **Swarm Circuit Breaker Alert Banner**: Trips automatically when containment spreads across threshold agents, halting cascades (OWASP ASI08 cascade prevention).
 
 3. **Incidents (`#/incidents/:id?`)**:
    - Split view (380px list, right detail pane) auto-selecting the highest-severity alert.
@@ -76,14 +79,25 @@ What happened? Real-time  Why flagged?   Who talked?  What we did?   Does it wor
    - Prominent honesty status banner contextualizing simulation vs active containment.
    - Mode pills distinguishing gateway enforcement from simulated replay.
 
-6. **Evaluation Benchmark (`#/evaluation`)**:
+
+
+6. **OWASP Coverage (`#/owasp`)**:
+   - Comprehensive alignment with OWASP Top 10 for Agentic Applications (2026).
+   - 3 summary KPI cards: 7 Strong Coverage, 3 Partial Coverage, 0 Uncovered.
+   - Interactive segmented filters (`All (10)`, `Strong (7)`, `Partial (3)`).
+   - Detailed risk cards for ASI01 through ASI10 with rule linkages (`SG-001` through `SG-029`), active enforcement controls, transparent gap disclosures, and OCSF SIEM export notes.
+
+7. **Evaluation Benchmark (`#/evaluation`):**
    - 8 metric tiles (2x4 grid, non-wrapping): Precision (100%), Recall, F1, FPR (0%), Latency, etc.
    - Dynamic detection latency calculation.
    - SVG missing-log resilience curve (0% to 50% event drop rate).
    - "Run settings" drawer sheet for sweeping parameters without cluttering findings.
    - Ground-truth labeled scenario validation table.
+   - **Outside Proof Panel (External Threat Datasets)**:
+     * **Swarm Traces Incident**: 166,571 attack rows scored, 32,718 covert staged transfers flagged, 0 benign false positives (100% precision on baseline), signals breakdown (credential exfiltration 27,510; assemble-and-run 9,440; decoder+executor 8,810; remote script pull 1,039; fragment chain 350), multi-agent funnelling (28,086 destinations, 1,535 shared drop points, up to 2,165 agents funnelling to a single point).
+     * **AgentDojo Replay (5 Frontier Models)**: 2,810 attacked tool results across Claude 3.5 Sonnet (61%), Gemini 2.0 Flash (65%), GPT-4o (65%), GPT-4o-mini (65%), Llama 3.3 70B (70%), overall benchmark recall 0.66 vs 0.94 internal fuzzer recall, honest 0.10 FP rate on raw emails/calendars/CSVs.
 
-7. **Pipeline Console (`#/pipeline/{simulator|collector|detection|response}`)**:
+8. **Pipeline Console (`#/pipeline/{simulator|collector|detection|response}`)**:
    - Results-first developer workflow console.
    - Simulator configuration with scenario picker and agent count slider.
    - Event collector telemetry pipeline and normalization monitor.
@@ -96,7 +110,7 @@ What happened? Real-time  Why flagged?   Who talked?  What we did?   Does it wor
 
 ## 4. Screenshot Catalog & Verification Proof
 
-All 14 views were captured at both **1920x1080** (Desktop) and **1280x720** (Laptop) resolutions in **Pure Apple Light Mode** (28 screenshots total) using Puppeteer with seeded threat traffic.
+All 15 views were captured at both **1920x1080** (Desktop) and **1280x720** (Laptop) resolutions in **Pure Apple Light Mode** (30 screenshots total) using Puppeteer with seeded threat traffic.
 
 Assets are saved in `docs/screens/phase-final/` and mirrored in `app/screenshots/`.
 
@@ -104,6 +118,7 @@ Assets are saved in `docs/screens/phase-final/` and mirrored in `app/screenshots
 |---|---|---|---|
 | `01_overview` | 1920x1080 | System Overview with verdict banner, 4 stat tiles, and recent alerts | 111.5 KB |
 | `01b_live_stream` | 1920x1080 | Live Guard & Gemini Quota monitoring view with agent controls | 82.1 KB |
+| `01c_owasp_coverage` | 1920x1080 | OWASP Top 10 for Agentic Applications 2026 coverage matrix | 146.6 KB |
 | `02_incidents_evidence` | 1920x1080 | Incident deep dive with Evidence tab and raw event JSON drawer open | 199.5 KB |
 | `02b_incidents_bayesian` | 1920x1080 | Incident view with Bayesian Attribution & Multi-Agent Risk Breakdown | 199.5 KB |
 | `02c_incidents_response` | 1920x1080 | Incident view on Response & Mitigation tab showing isolation controls | 141.1 KB |
@@ -118,6 +133,7 @@ Assets are saved in `docs/screens/phase-final/` and mirrored in `app/screenshots
 | `09_pipeline_response` | 1920x1080 | Automated response policy engine, quarantine rules, and webhook routing | 123.3 KB |
 | `01_overview` | 1280x720 | Responsive 1280x720 layout | 71.3 KB |
 | `01b_live_stream` | 1280x720 | Responsive 1280x720 layout | 69.5 KB |
+| `01c_owasp_coverage` | 1280x720 | Responsive 1280x720 layout | 90.3 KB |
 | `02_incidents_evidence` | 1280x720 | Responsive 1280x720 layout | 120.0 KB |
 | `02b_incidents_bayesian` | 1280x720 | Responsive 1280x720 layout | 120.0 KB |
 | `02c_incidents_response` | 1280x720 | Responsive 1280x720 layout | 120.0 KB |

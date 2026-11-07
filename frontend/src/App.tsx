@@ -1,3 +1,4 @@
+import { OwaspCoveragePage } from "./pages/OwaspCoveragePage";
 import { useEffect, useState } from "react";
 import { Banner, GlobalNav } from "./components/ui";
 import { OverviewPage } from "./pages/OverviewPage";
@@ -79,6 +80,8 @@ export default function App() {
     content = <LivePage />;
   } else if (cleanRoute === "evaluation") {
     content = <EvaluationPage />;
+  } else if (cleanRoute === "owasp" || cleanRoute === "coverage") {
+    content = <OwaspCoveragePage />;
   } else if (cleanRoute === "pipeline") {
     const subpage = route.split("/")[1] || "simulator";
     content = <PipelinePage subpage={subpage} />;

@@ -2,7 +2,7 @@ import { AUTH_REQUIRED, authHeaders } from "./lib/apiKey";
 import type {
   Agent, AgentAssessment, Alert, AuditItem, BaselineSummary, GeminiQuotaStatus, ReviewItem, BenchmarkResult, LiveReport, ReplayCase, CollectionResult, Dashboard, DetectionResult, DetectionRule, EvaluationResult, Meta, ModuleInfo,
   NormalizedEvent, RawEvent, ResponseAction, ResponsePolicy, ResponseResult, Run, ScenarioConfig, SimulationResult,
-  SuiteRequest, SuiteResult, AgentGraph,
+  SuiteRequest, SuiteResult, AgentGraph, OwaspCoverageResult,
 } from "./types";
 
 export class ApiError extends Error {
@@ -82,4 +82,5 @@ export const api = {
   evaluate: (run_id: string, persist: boolean) => post<EvaluationResult>("/evaluate", { run_id, persist }),
   suite: (req: SuiteRequest) => post<SuiteResult>("/evaluate/suite", req),
   evaluations: () => request<Array<Record<string, unknown>>>("/evaluations"),
+  owaspCoverage: () => request<OwaspCoverageResult>("/coverage/owasp"),
 };

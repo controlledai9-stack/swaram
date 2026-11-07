@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "swarm", path: "#/swarm", label: "Swarm" },
   { id: "responses", path: "#/responses", label: "Responses" },
   { id: "evaluation", path: "#/evaluation", label: "Evaluation" },
+  { id: "owasp", path: "#/owasp", label: "OWASP" },
   { id: "pipeline", path: "#/pipeline/simulator", label: "Pipeline" },
 ];
 

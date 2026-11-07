@@ -27,6 +27,15 @@ const views = [
     },
   },
   {
+    id: "01c_owasp_coverage",
+    hash: "#/owasp",
+    description: "OWASP Top 10 for Agentic Applications: 29 detection rules and pre-execution enforcement",
+    action: async (page) => {
+      await page.waitForSelector(".card", { timeout: 8000 });
+      await new Promise((r) => setTimeout(r, 600));
+    },
+  },
+  {
     id: "01b_live_stream",
     hash: "#/live",
     description: "Live Guard & Gemini Quota monitoring view with agent pause/resume controls",

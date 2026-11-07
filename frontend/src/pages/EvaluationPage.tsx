@@ -1,3 +1,4 @@
+import { OutsideProofCard } from "../components/OutsideProofCard";
 import { useState } from "react";
 import { useAppState, useRunData } from "../state";
 import { api } from "../api";
@@ -215,6 +216,9 @@ export function EvaluationPage() {
           </div>
         </div>
       </section>
+
+      {/* Section: Outside Proof Panel */}
+      <OutsideProofCard />
 
       {/* Section: Missing-Log Resilience Chart */}
       <section className="space-y-4">
