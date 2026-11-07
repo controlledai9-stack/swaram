@@ -7,7 +7,7 @@ import { shortId } from "../lib/format";
 import { type LiveMessage, useLiveStream } from "../lib/live";
 import { useAppState } from "../state";
 import type { AgentCount } from "../types";
-import { Zap, ShieldAlert, Lock, AlertTriangle, Play, Radio } from "lucide-react";
+import { Zap, ShieldAlert, Lock, AlertTriangle, Play, Radio, RotateCcw } from "lucide-react";
 
 type AnyData = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -20,6 +20,7 @@ const TONE: Record<string, string> = {
   run_failed: "bg-[var(--crit-bg)] text-[var(--crit)]",
   response: "bg-[var(--accent)]/10 text-[var(--accent)]",
   operator: "bg-[var(--crit-bg)] text-[var(--crit)]",
+  reset: "bg-[var(--ok-bg)] text-[var(--ok)]",
 };
 
 function describe(m: LiveMessage<AnyData>): { title: string; subtitle?: string; isPreBlock?: boolean; isCircuitBreaker?: boolean; isCovert?: boolean } {
@@ -74,6 +75,8 @@ function describe(m: LiveMessage<AnyData>): { title: string; subtitle?: string; 
       return { title: `Operator ${d.action} ${shortId(d.agent_id)}: ${d.result}` };
     case "review":
       return { title: `Review ${d.action}: ${shortId(d.item?.agent_id)} (${d.item?.kind})${d.item?.status !== "pending" ? ` → ${d.item?.status}` : ""}` };
+    case "reset":
+      return { title: "Live hub & containment reset by operator", subtitle: d.message };
     default:
       return { title: m.type };
   }
@@ -82,11 +85,12 @@ function describe(m: LiveMessage<AnyData>): { title: string; subtitle?: string; 
 /** Live monitor: real-time streaming telemetry, pre-execution gates, and circuit breaker status */
 export function LivePage() {
   const { meta } = useAppState();
-  const { messages, connected, clear } = useLiveStream();
+  const { messages, connected, totalReceived, clear, reset } = useLiveStream(undefined, 5000);
   const [scenario, setScenario] = useState("coordinated_leakage");
   const [count, setCount] = useState<AgentCount>(5);
   const [ai, setAi] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const [feedFilter, setFeedFilter] = useState<"all" | "security" | "blocks" | "containment">("all");
 
@@ -150,6 +154,31 @@ export function LivePage() {
     }
   }
 
+  async function handleResetAll() {
+    setResetting(true);
+    setStatus(null);
+    try {
+      const res = await api.resetLive();
+      reset();
+      setStatus({
+        kind: "success",
+        message: (
+          <>
+            All live telemetry, event queues, circuit breaker states, and {res.released_containments || "any"} contained agent states have been reset.
+          </>
+        ),
+      });
+    } catch (e) {
+      reset();
+      setStatus({
+        kind: "info",
+        message: "Local live stream, feed buffer, and counters reset.",
+      });
+    } finally {
+      setResetting(false);
+    }
+  }
+
   // Filter feed items
   const feed = useMemo(() => {
     return (messages as LiveMessage<AnyData>[])
@@ -165,7 +194,7 @@ export function LivePage() {
         }
         return true;
       })
-      .slice(-300)
+      .slice(-1000)
       .reverse();
   }, [messages, feedFilter]);
 
@@ -197,11 +226,24 @@ export function LivePage() {
     }
   }
 
+  const displayCount = totalReceived || messages.length;
+
   return (
     <div className="min-w-0 space-y-6">
       <PageHeader
         title="Live."
         subtitle="Real-time multi-agent telemetry stream with pre-execution policy gating, SG-029 covert transfer detection, and automatic swarm circuit-breakers."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={handleResetAll}
+            busy={resetting}
+            className="text-[13px] border-[var(--hairline)]"
+          >
+            <RotateCcw size={14} className="mr-1.5" />
+            <span>Reset All</span>
+          </Button>
+        }
       />
 
       <StatusBanner status={status} onClose={() => setStatus(null)} />
@@ -223,12 +265,22 @@ export function LivePage() {
                 </p>
               </div>
             </div>
-            <a
-              href="#/responses"
-              className="inline-flex items-center gap-1.5 rounded-full bg-[var(--crit)] px-4 py-2 text-[13px] font-semibold text-white shadow-xs hover:opacity-90"
-            >
-              <span>Inspect in Review Queue</span>
-            </a>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleResetAll}
+                disabled={resetting}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white border border-[var(--crit)]/30 px-3.5 py-2 text-[13px] font-semibold text-[var(--crit)] shadow-xs hover:bg-neutral-50 transition-all"
+              >
+                <RotateCcw size={13} className={resetting ? "animate-spin" : ""} />
+                <span>Reset Circuit Breaker &amp; Resume</span>
+              </button>
+              <a
+                href="#/responses"
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--crit)] px-4 py-2 text-[13px] font-semibold text-white shadow-xs hover:opacity-90"
+              >
+                <span>Inspect in Review Queue</span>
+              </a>
+            </div>
           </div>
         </div>
       )}
@@ -241,9 +293,11 @@ export function LivePage() {
             <span className={`h-2 w-2 rounded-full ${connected ? "bg-[var(--ok)] animate-pulse" : "bg-[var(--crit)]"}`} />
           </div>
           <div className="mt-2 text-[26px] font-bold tabular-nums text-[var(--text)]">
-            {messages.length}
+            {displayCount.toLocaleString()}
           </div>
-          <span className="text-[12px] text-[var(--text-2)]">Events Received</span>
+          <span className="text-[12px] text-[var(--text-2)]">
+            {totalReceived > messages.length ? `Showing latest ${messages.length.toLocaleString()} in feed` : "Events Received"}
+          </span>
         </div>
 
         <div className="rounded-[var(--r-card)] card p-4 border border-[var(--hairline-subtle)]">
@@ -290,11 +344,19 @@ export function LivePage() {
       <Card
         title="Start Live Multi-Agent Run"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-2)]">
               <Radio size={14} className={connected ? "text-[var(--ok)]" : "text-[var(--crit)]"} />
               {connected ? "WebSocket Connected" : "Connecting…"}
             </span>
+            <button
+              onClick={handleResetAll}
+              disabled={resetting}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--card)] px-3 py-1 text-[12px] font-medium text-[var(--text-2)] hover:border-[var(--text-3)] hover:text-[var(--text)] transition-all"
+            >
+              <RotateCcw size={12} className={resetting ? "animate-spin" : ""} />
+              <span>{resetting ? "Resetting…" : "Reset All"}</span>
+            </button>
           </div>
         }
       >
@@ -378,11 +440,18 @@ export function LivePage() {
                   Stop run (contain all)
                 </Button>
               )}
-              {!running && (
-                <p className="mt-3 text-[12px] text-[var(--text-3)] leading-relaxed">
-                  Run concluded. All containment actions queued in <a href="#/responses" className="text-[var(--link)] hover:underline">Responses review</a>.
-                </p>
-              )}
+              <div className="mt-3 flex items-center justify-between pt-2 border-t border-[var(--hairline-subtle)] text-[12px]">
+                <span className="text-[var(--text-3)]">
+                  {agents.filter(([, a]) => a.state === "paused").length} paused
+                </span>
+                <button
+                  onClick={handleResetAll}
+                  disabled={resetting}
+                  className="font-medium text-[var(--link)] hover:underline"
+                >
+                  Reset &amp; resume all
+                </button>
+              </div>
             </>
           ) : (
             <Empty>Agents appear when a run starts.</Empty>
@@ -390,7 +459,7 @@ export function LivePage() {
         </Card>
 
         {/* Right Column: Live Telemetry Stream */}
-        <Card title={`Live Feed (${messages.length})`}>
+        <Card title={`Live Feed (${displayCount.toLocaleString()})`}>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--hairline-subtle)] pb-3 text-[13px]">
             {/* Filter buttons */}
             <div className="inline-flex rounded-full bg-[var(--hairline-subtle)] p-0.5 text-[12px]">
@@ -428,9 +497,19 @@ export function LivePage() {
               </button>
             </div>
 
-            <button className="text-[12px] text-[var(--text-3)] hover:text-[var(--text)] underline" onClick={clear}>
-              Clear feed
-            </button>
+            <div className="flex items-center gap-3">
+              <button className="text-[12px] text-[var(--text-3)] hover:text-[var(--text)] underline" onClick={clear}>
+                Clear feed
+              </button>
+              <span className="text-[var(--hairline)]" aria-hidden>·</span>
+              <button
+                className="text-[12px] font-semibold text-[var(--crit)] hover:underline"
+                onClick={handleResetAll}
+                disabled={resetting}
+              >
+                {resetting ? "Resetting…" : "Reset All"}
+              </button>
+            </div>
           </div>
 
           {feed.length ? (
